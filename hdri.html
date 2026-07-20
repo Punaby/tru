@@ -6,10 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0B0C0E">
-<title>Dome — 360° Spherical HDRI Capture</title>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-
+<title>Dome — 360° HDRI Capture</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -21,10 +18,12 @@
     --text:#ECE9E4;
     --muted:#82868D;
     --accent:#FF4B2B;
+    --accent-dim: rgba(255,75,43,0.18);
     --guide:#37E6C6;
+    --guide-dim: rgba(55,230,198,0.25);
     --warn:#FFC24B;
-    --mono: 'JetBrains Mono', monospace;
-    --sans: 'Inter', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+    --sans: 'Inter', -apple-system, system-ui, sans-serif;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
   html,body{
@@ -40,97 +39,120 @@
   }
   .screen.active{ display:flex; }
 
-  .eyebrow{ font-family:var(--mono); font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--guide); margin-bottom:6px; }
-  h1{ font-size:26px; font-weight:700; margin:0 0 8px; }
+  .eyebrow{
+    font-family:var(--mono); font-size:11px; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--guide); margin-bottom:6px;
+  }
+  h1{ font-size:26px; font-weight:700; margin:0 0 8px; letter-spacing:-0.01em; }
   h2{ font-size:18px; font-weight:600; margin:0 0 4px; }
   p.sub{ color:var(--muted); font-size:14.5px; line-height:1.5; margin:0 0 20px; }
 
-  .card{ background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:16px; margin-bottom:14px; }
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    padding:16px; margin-bottom:14px;
+  }
   .row{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
   .row + .row{ margin-top:12px; }
 
-  button{ font-family:var(--sans); border:none; cursor:pointer; -webkit-appearance:none; }
-  .btn-primary{ width:100%; background:var(--accent); color:#fff; font-size:16px; font-weight:600; padding:16px; border-radius:14px; }
+  button{
+    font-family:var(--sans); border:none; cursor:pointer; -webkit-appearance:none;
+  }
+  .btn-primary{
+    width:100%; background:var(--accent); color:#fff; font-size:16px; font-weight:600;
+    padding:16px; border-radius:14px; letter-spacing:0.01em;
+  }
   .btn-primary:active{ transform:scale(0.98); }
   .btn-primary:disabled{ background:#3a3c3f; color:#77797d; }
-  .btn-secondary{ width:100%; background:var(--panel-2); color:var(--text); font-size:15px; font-weight:500; padding:14px; border-radius:14px; border:1px solid var(--line); }
-  .btn-ghost{ background:transparent; color:var(--muted); font-size:13.5px; padding:10px; text-decoration:underline; }
+  .btn-secondary{
+    width:100%; background:var(--panel-2); color:var(--text); font-size:15px; font-weight:500;
+    padding:14px; border-radius:14px; border:1px solid var(--line);
+  }
+  .btn-ghost{
+    background:transparent; color:var(--muted); font-size:13.5px; padding:10px; text-decoration:underline;
+  }
 
   .choice-group{ display:flex; gap:8px; }
-  .choice{ flex:1; text-align:center; padding:12px 6px; border-radius:12px; border:1px solid var(--line); background:var(--panel-2); font-size:13px; font-weight:600; color:var(--muted); }
+  .choice{
+    flex:1; text-align:center; padding:12px 6px; border-radius:12px; border:1px solid var(--line);
+    background:var(--panel-2); font-size:13px; font-weight:600; color:var(--muted);
+  }
   .choice.selected{ border-color:var(--guide); color:var(--guide); background:rgba(55,230,198,0.08); }
   .choice .sub{ display:block; font-weight:400; font-size:10.5px; color:var(--muted); margin-top:2px; font-family:var(--mono); }
 
-  .toggle{ width:46px; height:28px; border-radius:20px; background:#33363a; position:relative; flex-shrink:0; transition:background .15s; }
+  .toggle{
+    width:46px; height:28px; border-radius:20px; background:#33363a; position:relative; flex-shrink:0;
+    transition:background .15s;
+  }
   .toggle.on{ background:var(--guide); }
-  .toggle::after{ content:''; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:#fff; transition:left .15s; }
+  .toggle::after{
+    content:''; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%;
+    background:#fff; transition:left .15s;
+  }
   .toggle.on::after{ left:21px; }
   .toggle.disabled{ opacity:0.35; }
 
   input[type=range]{ width:100%; accent-color:var(--guide); }
+
   .label{ font-size:14px; font-weight:500; }
   .hint{ font-size:12px; color:var(--muted); margin-top:2px; }
 
+  /* --- Permission screen --- */
   #screen-intro{ justify-content:center; align-items:center; text-align:center; }
   .dome-mark{ width:84px; height:84px; margin-bottom:22px; }
   #screen-intro .card{ text-align:left; width:100%; max-width:420px; }
 
+  /* --- Setup screen --- */
   .radar-preview{ width:100%; border-radius:12px; background:#0E1013; border:1px solid var(--line); display:block; }
 
-  /* --- CAPTURE SCREEN (3D SPHERICAL VIEWPORT OVER CAMERA) --- */
-  #screen-capture{ padding:0; background:#000; overflow:hidden; }
-  
-  /* Live video feed in background */
+  /* --- Capture screen --- */
+  #screen-capture{ padding:0; }
   #video{
-    position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:1;
+    position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#000;
   }
-  
-  /* Transparent 3D Three.js canvas layer on top of video */
-  #webgl-canvas{
-    position:absolute; inset:0; width:100%; height:100%; z-index:2; pointer-events:none;
-  }
-
+  #overlay{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
   .cap-top{
     position:absolute; top:0; left:0; right:0; padding: max(16px, env(safe-area-inset-top)) 16px 10px;
-    background:linear-gradient(to bottom, rgba(0,0,0,0.65), transparent);
-    display:flex; justify-content:space-between; align-items:flex-start; font-family:var(--mono); z-index:10;
+    background:linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
+    display:flex; justify-content:space-between; align-items:flex-start; font-family:var(--mono);
   }
-  .readout{ font-size:12px; color:#fff; line-height:1.5; text-shadow:0 1px 3px rgba(0,0,0,0.8); }
+  .readout{ font-size:12px; color:#fff; line-height:1.5; text-shadow:0 1px 3px rgba(0,0,0,0.6); }
   .readout b{ color:var(--guide); }
   .progress-pill{
-    font-size:12px; background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.25);
-    color:#fff; padding:6px 12px; border-radius:20px; backdrop-filter:blur(8px);
+    font-size:12px; background:rgba(0,0,0,0.45); border:1px solid rgba(255,255,255,0.25);
+    color:#fff; padding:6px 12px; border-radius:20px; backdrop-filter:blur(6px);
   }
-
   .cap-bottom{
     position:absolute; left:0; right:0; bottom:0; padding: 14px 16px max(18px, env(safe-area-inset-bottom));
-    background:linear-gradient(to top, rgba(0,0,0,0.75), transparent);
-    display:flex; flex-direction:column; align-items:center; gap:14px; z-index:10;
+    background:linear-gradient(to top, rgba(0,0,0,0.65), transparent);
+    display:flex; flex-direction:column; align-items:center; gap:14px;
   }
   .radar-wrap{
-    background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:6px; backdrop-filter:blur(8px);
+    background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.15); border-radius:10px; padding:6px;
+    backdrop-filter:blur(6px);
   }
   .shutter-row{ display:flex; align-items:center; gap:22px; }
   .shutter{
-    width:74px; height:74px; border-radius:50%; background:transparent; border:4px solid #fff; padding:5px; pointer-events:auto;
+    width:74px; height:74px; border-radius:50%; background:transparent; border:4px solid #fff;
+    padding:5px; pointer-events:auto;
   }
   .shutter .inner{ width:100%; height:100%; border-radius:50%; background:var(--accent); transition:background .12s, transform .12s; }
   .shutter.aligned .inner{ background:var(--guide); transform:scale(1.05); }
   .shutter:active .inner{ transform:scale(0.85); }
   .side-btn{
-    pointer-events:auto; width:46px; height:46px; border-radius:50%; background:rgba(0,0,0,0.5);
-    border:1px solid rgba(255,255,255,0.25); color:#fff; font-size:18px; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(6px);
+    pointer-events:auto; width:46px; height:46px; border-radius:50%; background:rgba(0,0,0,0.45);
+    border:1px solid rgba(255,255,255,0.25); color:#fff; font-size:18px; display:flex; align-items:center; justify-content:center;
   }
   .hint-banner{
-    font-family:var(--mono); font-size:11.5px; color:#fff; background:rgba(0,0,0,0.5);
-    padding:6px 14px; border-radius:20px; border:1px solid rgba(255,255,255,0.2); backdrop-filter:blur(8px);
+    font-family:var(--mono); font-size:11.5px; color:#fff; background:rgba(0,0,0,0.4);
+    padding:6px 12px; border-radius:20px; border:1px solid rgba(255,255,255,0.15);
   }
 
-  /* --- PROCESSING & RESULT --- */
+  /* --- Processing --- */
   #screen-processing{ justify-content:center; align-items:center; text-align:center; }
   .bar-track{ width:100%; max-width:320px; height:8px; border-radius:6px; background:var(--panel-2); overflow:hidden; margin:18px 0 10px;}
   .bar-fill{ height:100%; width:0%; background:var(--guide); transition:width .2s; }
 
+  /* --- Result --- */
   #resultCanvasWrap{ width:100%; border-radius:14px; overflow:hidden; border:1px solid var(--line); margin-bottom:14px; background:#0E1013; }
   #resultCanvasWrap canvas{ width:100%; display:block; }
   .stat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
@@ -154,9 +176,9 @@
       <ellipse cx="50" cy="50" rx="16" ry="46" stroke="#FF4B2B" stroke-width="1.5" opacity="0.6"/>
       <circle cx="50" cy="50" r="5" fill="#FF4B2B"/>
     </svg>
-    <div class="eyebrow">Dome Spherical</div>
+    <div class="eyebrow">Dome</div>
     <h1>360° HDRI Capture</h1>
-    <p class="sub">Capture bracketed photo spheres projected in 3D space, guided by your motion sensors, then stitch an equirectangular map directly for Blender World lighting.</p>
+    <p class="sub">Turn your iPhone into a panorama rig. Dome guides you through a full sphere of photos using your motion sensors, then stitches an equirectangular map.</p>
     <div class="card">
       <div class="row"><span class="label">Camera</span><span class="hint" id="permCamStatus">not requested</span></div>
       <div class="row"><span class="label">Motion &amp; orientation</span><span class="hint" id="permMotionStatus">not requested</span></div>
@@ -168,10 +190,10 @@
   <section class="screen" id="screen-setup">
     <div class="eyebrow">Step 1 of 3</div>
     <h1>Plan the shoot</h1>
-    <p class="sub">Hold your phone steady and rotate on the spot rather than walking to avoid parallax error.</p>
+    <p class="sub">Pick a coverage density and, if you can, hold your phone at arm's length and rotate on the spot rather than walking — parallax between shots is the main source of stitching errors.</p>
 
     <div class="card">
-      <h2>Coverage Density</h2>
+      <h2>Coverage</h2>
       <p class="hint" style="margin-bottom:10px;">More shots = fewer gaps, slower capture.</p>
       <div class="choice-group" id="densityChoices">
         <div class="choice" data-val="quick">Quick<span class="sub">~20 shots</span></div>
@@ -181,7 +203,7 @@
     </div>
 
     <div class="card">
-      <h2>Output Map Resolution</h2>
+      <h2>Output map</h2>
       <div class="choice-group" id="resChoices">
         <div class="choice" data-val="1536">Preview<span class="sub">1536×768</span></div>
         <div class="choice selected" data-val="2048">Standard<span class="sub">2048×1024</span></div>
@@ -203,7 +225,7 @@
     <div class="card">
       <div class="row"><span class="label">Camera field of view</span><span class="hint" id="fovVal">68°</span></div>
       <input type="range" id="fovSlider" min="45" max="90" value="68">
-      <div class="hint">Adjust only if you know your camera's exact horizontal FOV.</div>
+      <div class="hint">Leave this unless you know your iPhone's horizontal FOV. Wrong values cause misaligned seams.</div>
     </div>
 
     <button class="btn-primary" id="btnStartCapture">Start capture</button>
@@ -211,8 +233,7 @@
 
   <section class="screen" id="screen-capture">
     <video id="video" autoplay playsinline muted></video>
-    
-    <div id="webgl-canvas"></div>
+    <canvas id="overlay"></canvas>
 
     <div class="cap-top">
       <div class="readout" id="readoutText">yaw <b>0°</b> · pitch <b>0°</b></div>
@@ -220,7 +241,7 @@
     </div>
 
     <div class="cap-bottom">
-      <div class="hint-banner" id="guideBanner">Rotate to align with 3D spherical node</div>
+      <div class="hint-banner" id="guideBanner">Rotate to align the ring, then shoot</div>
       <div class="radar-wrap"><canvas id="radarLive" width="220" height="112"></canvas></div>
       <div class="shutter-row">
         <button class="side-btn" id="btnCancelCapture">✕</button>
@@ -232,14 +253,14 @@
 
   <section class="screen" id="screen-processing">
     <h2 id="procTitle">Stitching your dome…</h2>
-    <p class="sub" id="procSub">Mapping texture fragments into equirectangular space.</p>
+    <p class="sub" id="procSub">Projecting each frame onto the sphere.</p>
     <div class="bar-track"><div class="bar-fill" id="procBar"></div></div>
     <div class="hint" id="procPct">0%</div>
   </section>
 
   <section class="screen" id="screen-result">
     <div class="eyebrow">Done</div>
-    <h1>Your HDRI Projection Ready</h1>
+    <h1>Your HDRI is ready</h1>
     <div id="resultCanvasWrap"><canvas id="resultCanvas"></canvas></div>
     <div class="stat-grid">
       <div class="stat"><div class="num" id="statCoverage">–</div><div class="lbl">sphere coverage</div></div>
@@ -248,11 +269,7 @@
     <button class="btn-primary" id="btnDownloadPng">Download panorama (.png)</button>
     <div style="height:10px;"></div>
     <button class="btn-secondary" id="btnDownloadHdr">Download radiance map (.hdr)</button>
-    <div class="card" style="margin-top:16px;">
-      <h2>Using this in Blender</h2>
-      <p class="tip">Go to <b>Shading Workspace</b> -> <b>World Shader</b>, add an <b>Environment Texture</b> node, load file &amp; connect to Background Color.</p>
-    </div>
-    <button class="btn-ghost" id="btnRestart">Capture a new dome</button>
+    <button class="btn-ghost" id="btnRestart" style="margin-top:16px;">Capture a new dome</button>
   </section>
 
 </div>
@@ -261,7 +278,7 @@
 (function(){
   "use strict";
 
-  /* ---------------- UTILITY MATH & CONVERSIONS ---------------- */
+  /* ---------------- utility math ---------------- */
   const D2R = Math.PI/180, R2D = 180/Math.PI;
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const lerp=(a,b,t)=>a+(b-a)*t;
@@ -273,8 +290,9 @@
   function cross(a,b){ return {x:a.y*b.z-a.z*b.y, y:a.z*b.x-a.x*b.z, z:a.x*b.y-a.y*b.x}; }
   function dot(a,b){ return a.x*b.x+a.y*b.y+a.z*b.z; }
   function norm(a){ const l=Math.sqrt(dot(a,a))||1e-9; return {x:a.x/l,y:a.y/l,z:a.z/l}; }
+  function addv(a,b){ return {x:a.x+b.x,y:a.y+b.y,z:a.z+b.z}; }
+  function scalev(a,s){ return {x:a.x*s,y:a.y*s,z:a.z*s}; }
 
-  // Device orientation quaternion math (DeviceOrientationControls standard)
   function qMul(a,b){
     return {
       x: a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
@@ -299,13 +317,10 @@
   }
   function qRotateVec(q, v){
     const qv = {x:q.x,y:q.y,z:q.z};
-    const t = { x: (qv.y*v.z - qv.z*v.y)*2, y: (qv.z*v.x - qv.x*v.z)*2, z: (qv.x*v.y - qv.y*v.x)*2 };
-    return {
-      x: v.x + t.x*q.w + (qv.y*t.z - qv.z*t.y),
-      y: v.y + t.y*q.w + (qv.z*t.x - qv.x*t.z),
-      z: v.z + t.z*q.w + (qv.x*t.y - qv.y*t.x)
-    };
+    const t = scalev(cross(qv, v), 2);
+    return addv(addv(v, scalev(t, q.w)), cross(qv, t));
   }
+
   const Q_WORLD_FIX = qFromAxisAngle({x:1,y:0,z:0}, -Math.PI/2);
 
   function orientationToBasis(alphaDeg, betaDeg, gammaDeg, screenAngleDeg){
@@ -314,14 +329,15 @@
     if (screenAngleDeg){
       out = qMul(out, qFromAxisAngle({x:0,y:0,z:1}, -screenAngleDeg*D2R));
     }
-    const forward = norm(qRotateVec(out, {x:0,y:0,z:-1}));
+    // Fixed: z flipped to +1 so forward matches runStitch ray directions
+    const forward = norm(qRotateVec(out, {x:0,y:0,z:1}));
     const up = norm(qRotateVec(out, {x:0,y:1,z:0}));
     const right = norm(cross(forward, up));
     const up2 = cross(right, forward);
-    return { forward, right, up: up2, rawQuat: out };
+    return { forward, right, up: up2 };
   }
 
-  // sRGB <-> linear conversion lookup table
+  // sRGB <-> linear lookup
   const S2L = new Float32Array(256);
   for(let i=0;i<256;i++){
     const c=i/255;
@@ -332,16 +348,16 @@
     return c<=0.0031308 ? c*12.92 : 1.055*Math.pow(c,1/2.4)-0.055;
   }
 
-  /* ---------------- STATE ---------------- */
+  /* ---------------- state ---------------- */
   const state = {
     stream:null, track:null,
-    density:'standard', outRes:2048, bracket:false, bracketSupported:false, bracketRange:null,
+    density:'standard', outRes:2048, bracket:false, bracketSupported:false,
     fovDeg:68,
     targets:[], captured:[],
-    orient:{yaw:0,pitch:0, forward:{x:0,y:0,z:1}, right:{x:1,y:0,z:0}, up:{x:0,y:1,z:0}, quat:null},
+    orient:{yaw:0,pitch:0, forward:{x:0,y:0,z:1}, right:{x:1,y:0,z:0}, up:{x:0,y:1,z:0}},
     smooth:{forward:{x:0,y:0,z:1}, up:{x:0,y:1,z:0}, inited:false},
     nextTargetIdx:-1,
-    resultLinear:null, resultW:0, resultH:0, resultCoverage:0, resultHDR:false
+    resultLinear:null, resultW:0, resultH:0, resultCoverage:0
   };
 
   const DENSITY_PRESETS = {
@@ -367,13 +383,13 @@
     return targets;
   }
 
-  /* ---------------- SCREEN MANAGEMENT ---------------- */
+  /* ---------------- screen management ---------------- */
   function showScreen(id){
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
     document.getElementById(id).classList.add('active');
   }
 
-  /* ---------------- PERMISSIONS & SENSORS ---------------- */
+  /* ---------------- permissions ---------------- */
   const btnEnable = document.getElementById('btnEnable');
   btnEnable.addEventListener('click', async ()=>{
     const errEl = document.getElementById('permError');
@@ -383,7 +399,9 @@
       if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
         const res = await DeviceOrientationEvent.requestPermission();
         document.getElementById('permMotionStatus').textContent = res === 'granted' ? 'granted' : 'denied';
-        if (res !== 'granted') throw new Error('Motion permission was denied.');
+        if (res !== 'granted') throw new Error('Motion & orientation access was denied. Dome needs this to guide capture.');
+      } else if (typeof DeviceOrientationEvent === 'undefined') {
+        throw new Error('This device/browser has no orientation sensors. Try on an iPhone in Safari.');
       } else {
         document.getElementById('permMotionStatus').textContent='granted';
       }
@@ -406,7 +424,7 @@
       setupSetupScreen();
       showScreen('screen-setup');
     }catch(err){
-      errEl.textContent = err.message || 'Permission request failed.';
+      errEl.textContent = err.message || 'Permission request failed. Make sure this page is loaded over HTTPS.';
       btnEnable.disabled=false; btnEnable.textContent='Enable camera & motion';
     }
   });
@@ -423,12 +441,12 @@
       const basis = orientationToBasis(e.alpha, e.beta, e.gamma, getScreenAngle());
 
       const s = state.smooth;
-      const a = s.inited ? 0.35 : 1.0;
+      const a = s.inited ? 0.3 : 1.0;
       if (!s.inited){
         s.forward = basis.forward; s.up = basis.up;
       } else {
-        s.forward = norm({x: s.forward.x*(1-a) + basis.forward.x*a, y: s.forward.y*(1-a) + basis.forward.y*a, z: s.forward.z*(1-a) + basis.forward.z*a});
-        s.up = norm({x: s.up.x*(1-a) + basis.up.x*a, y: s.up.y*(1-a) + basis.up.a, z: s.up.z*(1-a) + basis.up.z*a});
+        s.forward = norm(addv(scalev(s.forward,1-a), scalev(basis.forward,a)));
+        s.up = norm(addv(scalev(s.up,1-a), scalev(basis.up,a)));
       }
       s.inited = true;
 
@@ -438,17 +456,16 @@
       state.orient.forward = s.forward;
       state.orient.right = right;
       state.orient.up = up;
-      state.orient.quat = basis.rawQuat;
       state.orient.yaw = ((Math.atan2(s.forward.x, s.forward.z)*R2D)+360)%360;
       state.orient.pitch = Math.asin(clamp(s.forward.y,-1,1))*R2D;
     }, true);
   }
 
-  /* ---------------- SETUP SCREEN ---------------- */
+  /* ---------------- setup screen ---------------- */
   function setupSetupScreen(){
     document.getElementById('bracketHint').textContent = state.bracketSupported
-      ? 'Supported on this device — 3 bracketed exposures merged into HDR.'
-      : 'Single exposure mode on this browser/device.';
+      ? 'Supported on this device — 3 exposures per shot, merged into true HDR.'
+      : 'Not available in this browser — Dome will shoot single-exposure only.';
     document.getElementById('bracketToggle').classList.toggle('disabled', !state.bracketSupported);
     drawPlanPreview();
   }
@@ -496,97 +513,47 @@
     });
   }
 
-  /* ---------------- THREE.JS 3D SPHERICAL VIEWPORT SETUP ---------------- */
-  let scene, camera, renderer, cameraGroup, targets3DGroup, capturedPlanes3DGroup, centralReticle3D;
-
-  function initThreeJSViewport(){
-    const container = document.getElementById('webgl-canvas');
-    container.innerHTML = '';
-
-    scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(state.fovDeg, window.innerWidth / window.innerHeight, 0.1, 1000);
-    
-    // Transparent WebGL Renderer layered over camera video
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    container.appendChild(renderer.domElement);
-
-    cameraGroup = new THREE.Group();
-    cameraGroup.add(camera);
-    scene.add(cameraGroup);
-
-    // Center crosshair/reticle in camera space
-    const reticleGeo = new THREE.RingGeometry(0.02, 0.028, 32);
-    const reticleMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent:true, opacity:0.8 });
-    centralReticle3D = new THREE.Mesh(reticleGeo, reticleMat);
-    centralReticle3D.position.set(0, 0, -1);
-    camera.add(centralReticle3D);
-
-    targets3DGroup = new THREE.Group();
-    capturedPlanes3DGroup = new THREE.Group();
-    scene.add(targets3DGroup);
-    scene.add(capturedPlanes3DGroup);
-
-    rebuild3DTargets();
-  }
-
-  function rebuild3DTargets(){
-    while(targets3DGroup.children.length > 0) targets3DGroup.remove(targets3DGroup.children[0]);
-
-    const radius = 8;
-    state.targets.forEach((t, idx) => {
-      const fwd = t.fwd;
-      const x = fwd.x * radius;
-      const y = fwd.y * radius;
-      const z = fwd.z * radius;
-
-      // Outer target node ring floating in 3D sphere space
-      const geo = new THREE.RingGeometry(0.18, 0.24, 24);
-      const mat = new THREE.MeshBasicMaterial({ color: 0x37E6C6, side: THREE.DoubleSide, transparent: true, opacity: 0.85 });
-      const ringMesh = new THREE.Mesh(geo, mat);
-      ringMesh.position.set(x, y, z);
-      ringMesh.lookAt(0, 0, 0);
-      ringMesh.userData = { idx };
-      targets3DGroup.add(ringMesh);
-    });
-  }
-
-  function updateThreeJSCamera(){
-    if(!cameraGroup || !state.orient.quat) return;
-    const q = state.orient.quat;
-    cameraGroup.quaternion.set(q.x, q.y, q.z, q.w);
-  }
-
-  /* ---------------- CAPTURE LOOP ---------------- */
+  /* ---------------- capture screen ---------------- */
   const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
   const radarLive = document.getElementById('radarLive');
-  let rafId = null;
+  let rafId=null;
 
   document.getElementById('btnStartCapture').addEventListener('click', async ()=>{
     state.targets = buildTargets(state.density);
     state.captured = [];
     video.srcObject = state.stream;
     await video.play().catch(()=>{});
-
-    initThreeJSViewport();
+    resizeOverlay();
     showScreen('screen-capture');
     tick();
   });
 
+  window.addEventListener('resize', resizeOverlay);
+  function resizeOverlay(){
+    overlay.width = overlay.clientWidth * devicePixelRatio;
+    overlay.height = overlay.clientHeight * devicePixelRatio;
+  }
+
+  function angularDist(fwdA, fwdB){
+    return Math.acos(clamp(dot(fwdA,fwdB), -1, 1)) * R2D;
+  }
+
   function nearestUncapturedTarget(){
-    const curFwd = state.orient.forward;
+    const curFwd = forwardFromYawPitch(state.orient.yaw, state.orient.pitch);
     let best=-1, bestD=1e9;
     state.targets.forEach((t,i)=>{
       if (t.captured) return;
-      const d = Math.acos(clamp(dot(curFwd, t.fwd), -1, 1)) * R2D;
+      const d = angularDist(curFwd, t.fwd);
       if (d<bestD){ bestD=d; best=i; }
     });
     return {idx:best, dist:bestD};
   }
 
   function tick(){
-    updateThreeJSCamera();
+    const octx = overlay.getContext('2d');
+    const W=overlay.width, H=overlay.height;
+    octx.clearRect(0,0,W,H);
 
     const {idx, dist} = nearestUncapturedTarget();
     state.nextTargetIdx = idx;
@@ -598,31 +565,33 @@
     const aligned = idx>=0 && dist < 12;
     document.getElementById('btnShutter').classList.toggle('aligned', aligned);
     document.getElementById('guideBanner').textContent = idx<0
-      ? 'All targets captured — tap ✓ to finish'
-      : (aligned ? 'Aligned with 3D node — tap shutter' : 'Turn towards nearest 3D target ring');
+      ? 'All positions covered — tap ✓ to finish'
+      : (aligned ? 'Aligned — tap to shoot' : 'Rotate toward the teal ring');
 
-    // Update 3D target visual state
-    targets3DGroup.children.forEach(mesh => {
-      const targetIdx = mesh.userData.idx;
-      if (state.targets[targetIdx].captured) {
-        mesh.visible = false;
+    if (idx>=0){
+      const basis = state.orient;
+      const t = state.targets[idx];
+      const camX = dot(t.fwd, basis.right), camY = dot(t.fwd, basis.up), camZ = dot(t.fwd, basis.forward);
+      const f = (W/2) / Math.tan(state.fovDeg*D2R/2);
+      if (camZ > 0.05){
+        const ximg = f*camX/camZ, yimg = f*camY/camZ;
+        const px = W/2 + ximg, py = H/2 - yimg;
+        octx.strokeStyle = aligned ? '#37E6C6' : '#FF4B2B';
+        octx.lineWidth = 3*devicePixelRatio;
+        octx.beginPath(); octx.arc(px,py, 34*devicePixelRatio, 0, Math.PI*2); octx.stroke();
+        octx.beginPath(); octx.moveTo(px-14*devicePixelRatio,py); octx.lineTo(px+14*devicePixelRatio,py); octx.stroke();
+        octx.beginPath(); octx.moveTo(px,py-14*devicePixelRatio); octx.lineTo(px,py+14*devicePixelRatio); octx.stroke();
       } else {
-        mesh.visible = true;
-        if (targetIdx === idx) {
-          mesh.material.color.setHex(aligned ? 0x37E6C6 : 0xFF4B2B);
-          mesh.scale.set(1.3, 1.3, 1.3);
-        } else {
-          mesh.material.color.setHex(0x37E6C6);
-          mesh.scale.set(1.0, 1.0, 1.0);
-        }
+        const ang = Math.atan2(camY, camX);
+        const ex = W/2 + Math.cos(ang)*W*0.4, ey = H/2 - Math.sin(ang)*W*0.4;
+        octx.fillStyle = '#FF4B2B';
+        octx.beginPath(); octx.arc(clamp(ex,40,W-40), clamp(ey,40,H-40), 16*devicePixelRatio,0,Math.PI*2); octx.fill();
       }
-    });
-
-    if (centralReticle3D) {
-      centralReticle3D.material.color.setHex(aligned ? 0x37E6C6 : 0xffffff);
     }
 
-    renderer.render(scene, camera);
+    octx.fillStyle='rgba(255,255,255,0.6)';
+    octx.beginPath(); octx.arc(W/2,H/2,3*devicePixelRatio,0,Math.PI*2); octx.fill();
+
     drawRadar(radarLive, state.orient, state.targets, state.nextTargetIdx);
     rafId = requestAnimationFrame(tick);
   }
@@ -645,12 +614,14 @@
     ctx.beginPath(); ctx.arc(cx,cy,4,0,Math.PI*2); ctx.fill();
   }
 
-  /* ---------------- CAPTURING & ADDING 3D PROJECTION PLANES ---------------- */
+  /* ---- capturing frames ---- */
   const WORK_W = 900;
 
   function grabCanvas(){
-    const vw = video.videoWidth, vh = video.videoHeight;
-    const w = WORK_W, h = Math.round(WORK_W * vh/vw);
+    const vw = video.videoWidth || 1280;
+    const vh = video.videoHeight || 720;
+    const w = WORK_W;
+    const h = Math.round(WORK_W * vh/vw);
     const c = document.createElement('canvas'); c.width=w; c.height=h;
     const ctx = c.getContext('2d');
     ctx.drawImage(video, 0,0, w,h);
@@ -664,11 +635,8 @@
   function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
   async function doCapture(){
-    const {idx} = {idx: state.nextTargetIdx};
     const yaw=state.orient.yaw, pitch=state.orient.pitch;
     const basisSnap = { forward: {...state.orient.forward}, right: {...state.orient.right}, up: {...state.orient.up} };
-
-    let capturedCanvas;
 
     if (state.bracket && state.bracketSupported){
       const range = state.bracketRange || {min:-2,max:2};
@@ -678,11 +646,10 @@
         await setExposure(ev);
         await sleep(180);
         const g = grabCanvas();
-        shots.push({ev, data: g.ctx.getImageData(0,0,g.w,g.h).data, w:g.w, h:g.h, canvas:g.canvas});
+        shots.push({ev, data: g.ctx.getImageData(0,0,g.w,g.h).data, w:g.w, h:g.h});
       }
       await setExposure(0);
       const {w,h} = shots[0];
-      capturedCanvas = shots[1].canvas;
       const linear = new Float32Array(w*h*3);
       for(let p=0;p<w*h;p++){
         let sumW=0, r=0,g2=0,b=0;
@@ -701,34 +668,15 @@
       state.captured.push({yaw,pitch, basis:basisSnap, w,h, isHDR:true, linear});
     } else {
       const g = grabCanvas();
-      capturedCanvas = g.canvas;
       const pixels = g.ctx.getImageData(0,0,g.w,g.h).data;
       state.captured.push({yaw,pitch, basis:basisSnap, w:g.w, h:g.h, isHDR:false, pixels});
     }
 
-    // Add projected keyframe thumbnail into 3D world space
-    if(capturedCanvas){
-      const tex = new THREE.CanvasTexture(capturedCanvas);
-      const planeGeo = new THREE.PlaneGeometry(3.2, 2.2);
-      const planeMat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, transparent:true, opacity:0.75 });
-      const planeMesh = new THREE.Mesh(planeGeo, planeMat);
-
-      if(cameraGroup){
-        planeMesh.quaternion.copy(cameraGroup.quaternion);
-        const fwdVec = new THREE.Vector3(0,0,-7.5).applyQuaternion(cameraGroup.quaternion);
-        planeMesh.position.copy(fwdVec);
-        capturedPlanes3DGroup.add(planeMesh);
-      }
-    }
-
     if (state.nextTargetIdx>=0) state.targets[state.nextTargetIdx].captured = true;
     else {
-      const curFwd = state.orient.forward;
+      const curFwd = forwardFromYawPitch(yaw,pitch);
       let best=-1,bd=1e9;
-      state.targets.forEach((t,i)=>{
-        const d = Math.acos(clamp(dot(curFwd,t.fwd),-1,1))*R2D;
-        if(d<bd){bd=d;best=i;}
-      });
+      state.targets.forEach((t,i)=>{ const d=angularDist(curFwd,t.fwd); if(d<bd){bd=d;best=i;} });
       if (best>=0 && bd<10) state.targets[best].captured = true;
     }
   }
@@ -749,12 +697,12 @@
     showScreen('screen-setup');
   });
   document.getElementById('btnFinish').addEventListener('click', ()=>{
-    if (state.captured.length < 3){ alert('Capture at least 3 photos first.'); return; }
+    if (state.captured.length < 3){ alert('Capture at least a few photos first.'); return; }
     cancelAnimationFrame(rafId);
     runStitch();
   });
 
-  /* ---------------- STITCHING PROCESS ---------------- */
+  /* ---------------- stitching ---------------- */
   function bilinearLDR(pixels,w,h,u,v){
     const x0=clamp(Math.floor(u),0,w-1), y0=clamp(Math.floor(v),0,h-1);
     const x1=Math.min(x0+1,w-1), y1=Math.min(y0+1,h-1);
@@ -870,7 +818,7 @@
     showScreen('screen-result');
   }
 
-  /* ---------------- EXPORTS ---------------- */
+  /* ---------------- export ---------------- */
   document.getElementById('btnDownloadPng').addEventListener('click', ()=>{
     const cv = document.getElementById('resultCanvas');
     cv.toBlob(blob=>{
