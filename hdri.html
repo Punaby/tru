@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gyro 360 Capture Stitcher</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #111; color: #fff; margin: 0; padding: 0; overflow: hidden;
+            display: flex; flex-direction: column; height: 100vh;
+        }
+        #camera-view, #viewer-container {
+            width: 100%; flex-grow: 1; background: #000; position: relative;
+        }
+        #viewer-container { display: none; }
+        .ui-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: space-between;
+            pointer-events: none; box-sizing: border-box; padding: 20px;
+        }
+        .interactive { pointer-events: auto; }
+        .hud-text {
+            background: rgba(0,0,0,0.7); padding: 10px 15px; border-radius: 20px;
+            align-self: center; font-size: 14px; font-weight: bold; text-align: center;
+        }
+        /* Reticle UI elements */
+        #reticle-container {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 100px; height: 100px;
+        }
+        .circle {
+            position: absolute; border-radius: 50%; border: 3px solid;
+            top: 50%; left: 50%; transform: translate(-50%, -50%); transition: all 0.05s linear;
+        }
+        #center-dot { width: 10px; height: 10px; background: #00ffcc; border: none; }
+        #target-ring { width: 50px; height: 50px; border-color: #ff3366; }
+        
+        #btn-action {
+            background: #00adb5; color: white; border: none; padding: 15px 30px;
+            font-size: 16px; font-weight: bold; border-radius: 30px; align-self: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.4); cursor: pointer;
+        }
+        #filmstrip {
+            height: 60px; background: rgba(0,0,0,0.8); display: flex;
+            gap: 5px; padding: 5px; overflow-x: auto; border-top: 1px solid #333;
+        }
+        #filmstrip img { height: 100%; border-radius: 4px; border: 1px solid #55px; }
+    </style>
+</head>
+<body>
+
+    <div id="camera-view">
+        <video id="video-stream" autoplay playsinline muted style="width:100%; height:100%; object-fit:cover;"></video>
+        
+        <div class="ui-overlay">
+            <div class="hud-text" id="status-hud">Click 'Start Gyro' to begin</div>
+            
+            <div id="reticle-container">
+                <div class="circle" id="center-dot"></div>
+                <div class="circle" id="target-ring"></div>
+            </div>
+            
+            <button id="btn-action" class="interactive">Start Gyro & Camera</button>
+        </div>
+    </div>
+
+    <div id="viewer-container"></div>
+
+    <div id="filmstrip"></div>
+
+    <canvas id="stitch-canvas" style="display:none;"></canvas>
+
+    <script>
+        const video = document.getElementById('video-stream');
+        const btnAction = document.getElementById('btn-action');
+        const statusHud = document.getElementById('status-hud');
+        const targetRing = document.getElementById('target-ring');
+        const filmstrip = document.getElementById('filmstrip');
+        const stitchCanvas = document.getElementById('stitch-canvas');
+        const ctx = stitchCanvas.getContext('2d');
+
+        let isCapturing = false;
+        let currentTargetIdx = 0;
+        let initialYaw = null;
+        let currentYaw = 0, currentPitch = 0;
+        let capturedFrames = [];
+
+        // Define target rotation stops around the 360 horizon loop (in degrees)
+        // With a normal lens, 8 stops provides a clean ~45 deg step interval allowing 25%+ overlap margins
+        const targetAngles = [0, 45, 90, 135, 180, 225, 270, 315];
+        const SNAP_THRESHOLD = 4; // Accuracy threshold window in degrees to auto-snap
+
+        btnAction.addEventListener('click', initializeApp);
+
+        async function initializeApp() {
+            if (isCapturing) return; // Already running
+            
+            // 1. Request iOS DeviceOrientation Sensor Access Permissions
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const permissionState = await DeviceOrientationEvent.requestPermission();
+                    if (permissionState !== 'granted') {
+                        alert('Gyroscope sensor access is required for alignment mapping.');
+                        return;
+                    }
+                } catch (error) { console.error(error); }
+            }
+
+            // 2. Initialize Hardware Camera Feed Pipeline
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+                    audio: false
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                alert("Camera initialization failed. Ensure you are running via HTTPS connection.");
+                return;
+            }
+
+            // 3. Bind Real-time Gyroscope Event Handler Listener
+            window.addEventListener('deviceorientation', handleOrientation, true);
+            
+            isCapturing = true;
+            btnAction.style.display = 'none';
+            statusHud.textContent = "Slowly rotate right to match the targets";
+            animateHUDUpdate();
+        }
+
+        function handleOrientation(event) {
+            // alpha = yaw [0, 360], beta = pitch [-180, 180]
+            let yaw = event.alpha; 
+            let pitch = event.beta;
+
+            if (initialYaw === null) {
+                initialYaw = yaw; // Establish directional starting index zero axis anchor
+            }
+
+            // Normalize current position relative to initial capture direction
+            currentYaw = (yaw - initialYaw + 360) % 360;
+            currentPitch = pitch - 90; // Relative displacement from vertical neutral point (assumes landscape/portrait hold)
+        }
+
+        function animateHUDUpdate() {
+            if (!isCapturing) return;
+
+            let desiredYaw = targetAngles[currentTargetIdx];
+            
+            // Calculate rotational angular error difference mapping
+            let diffYaw = ((currentYaw - desiredYaw + 180 + 360) % 360) - 180;
+            let diffPitch = currentPitch; // Maintain zero baseline parallel to horizon grid
+
+            // Map visual reticle guidance circle displacement offset multipliers 
+            let visualX = diffYaw * -4; 
+            let visualY = diffPitch * 4;
+
+            targetRing.style.transform = `translate(calc(-50% + ${visualX}px), calc(-50% + ${visualY}px))`;
+
+            // Detect if tracking position parameters meet automatic stabilization snapping window
+            if (Math.abs(diffYaw) < SNAP_THRESHOLD && Math.abs(diffPitch) < SNAP_THRESHOLD) {
+                targetRing.style.borderColor = '#00ffcc'; // Target lock color shift
+                executeSnapshot(desiredYaw);
+            } else {
+                targetRing.style.borderColor = '#ff3366';
+            }
+
+            requestAnimationFrame(animateHUDUpdate);
+        }
+
+        function executeSnapshot(angleSnapped) {
+            // Freeze processing momentarily to prevent duplicate firing triggers
+            window.removeEventListener('deviceorientation', handleOrientation, true);
+
+            // Draw current video stream hardware viewport matrix frame down to hidden working bitmap cache
+            if (capturedFrames.length === 0) {
+                stitchCanvas.width = video.videoWidth;
+                stitchCanvas.height = video.videoHeight;
+            }
+            
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = video.videoWidth;
+            tempCanvas.height = video.videoHeight;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(video, 0, 0);
+
+            capturedFrames.push({ angle: angleSnapped, imgData: tempCanvas });
+
+            // Create visible interface filmstrip progress preview indicator
+            const thumb = new Image();
+            thumb.src = tempCanvas.toDataURL('image/jpeg', 0.5);
+            filmstrip.appendChild(thumb);
+
+            currentTargetIdx++;
+
+            if (currentTargetIdx < targetAngles.length) {
+                statusHud.textContent = `Captured frame ${capturedFrames.length}/${targetAngles.length}. Turn to next target.`;
+                // Resume listening loop tracking updates
+                setTimeout(() => {
+                    window.addEventListener('deviceorientation', handleOrientation, true);
+                }, 1500); // 1.5s cool-down buffer to move off target safely
+            } else {
+                // All slots successfully filled out. Transition to stitching sequence.
+                isCapturing = false;
+                statusHud.textContent = "Processing and stitching full panorama...";
+                processGyroStitch();
+            }
+        }
+
+        function processGyroStitch() {
+            // Automatically calculate horizontal progression dimensions 
+            const frameWidth = stitchCanvas.width;
+            const frameHeight = stitchCanvas.height;
+            
+            // Estimate spatial blending canvas widths automatically using dynamic overlap ratios
+            const overlapPixels = Math.floor(frameWidth * 0.30); // 30% uniform frame coverage margins
+            const stepStride = frameWidth - overlapPixels;
+            
+            stitchCanvas.width = (stepStride * capturedFrames.length) + overlapPixels;
+            ctx.clearRect(0, 0, stitchCanvas.width, stitchCanvas.height);
+
+            capturedFrames.forEach((frame, idx) => {
+                let targetX = idx * stepStride;
+
+                if (idx === 0) {
+                    ctx.drawImage(frame.imgData, 0, 0);
+                } else {
+                    const buffer = document.createElement('canvas');
+                    buffer.width = frameWidth; buffer.height = frameHeight;
+                    const bCtx = buffer.getContext('2d');
+                    bCtx.drawImage(frame.imgData, 0, 0);
+
+                    // Mask feathering gradient blending interface processing block
+                    bCtx.globalCompositeOperation = 'destination-out';
+                    const gradient = bCtx.createLinearGradient(0, 0, overlapPixels, 0);
+                    gradient.addColorStop(0, 'rgba(0,0,0,1)');
+                    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+                    bCtx.fillStyle = gradient;
+                    bCtx.fillRect(0, 0, overlapPixels, frameHeight);
+                    bCtx.globalCompositeOperation = 'source-over';
+
+                    ctx.drawImage(buffer, targetX, 0);
+                }
+            });
+
+            renderFinal3DViewer();
+        }
+
+        function renderFinal3DViewer() {
+            document.getElementById('camera-view').style.display = 'none';
+            const viewerContainer = document.getElementById('viewer-container');
+            viewerContainer.style.display = 'block';
+
+            // Instantiating standard Three.js render viewing projection loop matching previous structure
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1100);
+            const geometry = new THREE.SphereGeometry(500, 60, 40);
+            geometry.scale(-1, 1, 1);
+
+            const texture = new THREE.CanvasTexture(stitchCanvas);
+            const material = new THREE.MeshBasicMaterial({ map: texture });
+            const sphere = new THREE.Mesh(geometry, material);
+            scene.add(sphere);
+
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            viewerContainer.appendChild(renderer.domElement);
+
+            // Quick default rotational sweep animation script
+            function renderLoop() {
+                requestAnimationFrame(renderLoop);
+                sphere.rotation.y += 0.002;
+                renderer.render(scene, camera);
+            }
+            renderLoop();
+        }
+    </script>
+</body>
+</html>
