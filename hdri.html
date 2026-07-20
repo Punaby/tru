@@ -5,20 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0B0C0E">
 <title>Dome — 360° Spherical HDRI Capture</title>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
 <style>
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
 
   :root{
-    --bg:#000000;
+    --bg:#0B0C0E;
     --panel:#15171A;
     --panel-2:#1D2024;
-    --line: rgba(255,255,255,0.12);
+    --line: rgba(255,255,255,0.08);
     --text:#ECE9E4;
     --muted:#82868D;
     --accent:#FF4B2B;
     --guide:#37E6C6;
+    --warn:#FFC24B;
     --mono: 'JetBrains Mono', monospace;
     --sans: 'Inter', system-ui, sans-serif;
   }
@@ -37,14 +41,15 @@
   .screen.active{ display:flex; }
 
   .eyebrow{ font-family:var(--mono); font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--guide); margin-bottom:6px; }
-  h1{ font-size:24px; font-weight:700; margin:0 0 8px; }
-  p.sub{ color:var(--muted); font-size:14px; line-height:1.45; margin:0 0 18px; }
+  h1{ font-size:26px; font-weight:700; margin:0 0 8px; }
+  h2{ font-size:18px; font-weight:600; margin:0 0 4px; }
+  p.sub{ color:var(--muted); font-size:14.5px; line-height:1.5; margin:0 0 20px; }
 
-  .card{ background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:16px; margin-bottom:12px; }
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:16px; margin-bottom:14px; }
   .row{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
-  .row + .row{ margin-top:10px; }
+  .row + .row{ margin-top:12px; }
 
-  button{ font-family:var(--sans); border:none; cursor:pointer; }
+  button{ font-family:var(--sans); border:none; cursor:pointer; -webkit-appearance:none; }
   .btn-primary{ width:100%; background:var(--accent); color:#fff; font-size:16px; font-weight:600; padding:16px; border-radius:14px; }
   .btn-primary:active{ transform:scale(0.98); }
   .btn-primary:disabled{ background:#3a3c3f; color:#77797d; }
@@ -52,140 +57,202 @@
   .btn-ghost{ background:transparent; color:var(--muted); font-size:13.5px; padding:10px; text-decoration:underline; }
 
   .choice-group{ display:flex; gap:8px; }
-  .choice{ flex:1; text-align:center; padding:10px 4px; border-radius:12px; border:1px solid var(--line); background:var(--panel-2); font-size:13px; font-weight:600; color:var(--muted); }
-  .choice.selected{ border-color:var(--guide); color:var(--guide); background:rgba(55,230,198,0.1); }
-  .choice .sub{ display:block; font-weight:400; font-size:10px; color:var(--muted); margin-top:2px; font-family:var(--mono); }
+  .choice{ flex:1; text-align:center; padding:12px 6px; border-radius:12px; border:1px solid var(--line); background:var(--panel-2); font-size:13px; font-weight:600; color:var(--muted); }
+  .choice.selected{ border-color:var(--guide); color:var(--guide); background:rgba(55,230,198,0.08); }
+  .choice .sub{ display:block; font-weight:400; font-size:10.5px; color:var(--muted); margin-top:2px; font-family:var(--mono); }
 
   .toggle{ width:46px; height:28px; border-radius:20px; background:#33363a; position:relative; flex-shrink:0; transition:background .15s; }
   .toggle.on{ background:var(--guide); }
   .toggle::after{ content:''; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:#fff; transition:left .15s; }
   .toggle.on::after{ left:21px; }
+  .toggle.disabled{ opacity:0.35; }
 
-  #video-hidden{ display:none; }
+  input[type=range]{ width:100%; accent-color:var(--guide); }
+  .label{ font-size:14px; font-weight:500; }
+  .hint{ font-size:12px; color:var(--muted); margin-top:2px; }
 
-  /* --- Capture Viewport (3D Pinhole Projection) --- */
+  #screen-intro{ justify-content:center; align-items:center; text-align:center; }
+  .dome-mark{ width:84px; height:84px; margin-bottom:22px; }
+  #screen-intro .card{ text-align:left; width:100%; max-width:420px; }
+
+  .radar-preview{ width:100%; border-radius:12px; background:#0E1013; border:1px solid var(--line); display:block; }
+
+  /* --- CAPTURE SCREEN (3D SPHERICAL VIEWPORT OVER CAMERA) --- */
   #screen-capture{ padding:0; background:#000; overflow:hidden; }
-  #webgl-container{ position:absolute; inset:0; width:100%; height:100%; }
-
-  .cap-header{
-    position:absolute; top:0; left:0; right:0; padding: max(12px, env(safe-area-inset-top)) 16px 12px;
-    display:flex; justify-content:space-between; align-items:center; z-index:10;
+  
+  /* Live video feed in background */
+  #video{
+    position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:1;
   }
-  .cap-btn-round{
-    width:38px; height:38px; border-radius:50%; background:rgba(0,0,0,0.6); border:1px solid var(--line);
-    color:#fff; font-size:18px; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(8px);
-  }
-  .instruction-box{
-    position:absolute; top: max(60px, env(safe-area-inset-top)); left:50%; transform:translateX(-50%);
-    background:#2A85FF; color:#fff; padding:10px 18px; border-radius:8px; font-size:15px; font-weight:600;
-    text-align:center; width:calc(100% - 40px); max-width:340px; box-shadow:0 4px 12px rgba(0,0,0,0.3); z-index:10;
+  
+  /* Transparent 3D Three.js canvas layer on top of video */
+  #webgl-canvas{
+    position:absolute; inset:0; width:100%; height:100%; z-index:2; pointer-events:none;
   }
 
-  .cap-footer{
-    position:absolute; bottom:0; left:0; right:0; padding: 12px 16px max(18px, env(safe-area-inset-bottom));
-    display:flex; flex-direction:column; align-items:center; gap:12px; z-index:10;
-    background:linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+  .cap-top{
+    position:absolute; top:0; left:0; right:0; padding: max(16px, env(safe-area-inset-top)) 16px 10px;
+    background:linear-gradient(to bottom, rgba(0,0,0,0.65), transparent);
+    display:flex; justify-content:space-between; align-items:flex-start; font-family:var(--mono); z-index:10;
   }
-  .counter-badge{
-    font-family:var(--mono); font-size:12px; background:rgba(0,0,0,0.6); color:#fff; padding:4px 12px;
-    border-radius:12px; border:1px solid var(--line); backdrop-filter:blur(6px);
+  .readout{ font-size:12px; color:#fff; line-height:1.5; text-shadow:0 1px 3px rgba(0,0,0,0.8); }
+  .readout b{ color:var(--guide); }
+  .progress-pill{
+    font-size:12px; background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.25);
+    color:#fff; padding:6px 12px; border-radius:20px; backdrop-filter:blur(8px);
   }
+
+  .cap-bottom{
+    position:absolute; left:0; right:0; bottom:0; padding: 14px 16px max(18px, env(safe-area-inset-bottom));
+    background:linear-gradient(to top, rgba(0,0,0,0.75), transparent);
+    display:flex; flex-direction:column; align-items:center; gap:14px; z-index:10;
+  }
+  .radar-wrap{
+    background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:6px; backdrop-filter:blur(8px);
+  }
+  .shutter-row{ display:flex; align-items:center; gap:22px; }
   .shutter{
-    width:70px; height:70px; border-radius:50%; background:transparent; border:4px solid #fff; padding:4px;
+    width:74px; height:74px; border-radius:50%; background:transparent; border:4px solid #fff; padding:5px; pointer-events:auto;
   }
-  .shutter .inner{ width:100%; height:100%; border-radius:50%; background:var(--accent); transition:transform .12s, background .12s; }
-  .shutter.aligned .inner{ background:var(--guide); transform:scale(1.08); }
+  .shutter .inner{ width:100%; height:100%; border-radius:50%; background:var(--accent); transition:background .12s, transform .12s; }
+  .shutter.aligned .inner{ background:var(--guide); transform:scale(1.05); }
+  .shutter:active .inner{ transform:scale(0.85); }
+  .side-btn{
+    pointer-events:auto; width:46px; height:46px; border-radius:50%; background:rgba(0,0,0,0.5);
+    border:1px solid rgba(255,255,255,0.25); color:#fff; font-size:18px; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(6px);
+  }
+  .hint-banner{
+    font-family:var(--mono); font-size:11.5px; color:#fff; background:rgba(0,0,0,0.5);
+    padding:6px 14px; border-radius:20px; border:1px solid rgba(255,255,255,0.2); backdrop-filter:blur(8px);
+  }
 
-  /* --- Result Screen --- */
+  /* --- PROCESSING & RESULT --- */
+  #screen-processing{ justify-content:center; align-items:center; text-align:center; }
+  .bar-track{ width:100%; max-width:320px; height:8px; border-radius:6px; background:var(--panel-2); overflow:hidden; margin:18px 0 10px;}
+  .bar-fill{ height:100%; width:0%; background:var(--guide); transition:width .2s; }
+
   #resultCanvasWrap{ width:100%; border-radius:14px; overflow:hidden; border:1px solid var(--line); margin-bottom:14px; background:#0E1013; }
   #resultCanvasWrap canvas{ width:100%; display:block; }
   .stat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
   .stat{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; }
   .stat .num{ font-family:var(--mono); font-size:19px; font-weight:700; color:var(--guide); }
   .stat .lbl{ font-size:11px; color:var(--muted); margin-top:2px; }
+
+  .tip{ font-size:13px; color:var(--muted); line-height:1.55; }
+  .tip b{ color:var(--text); }
+
+  ::-webkit-scrollbar{ display:none; }
 </style>
 </head>
 <body>
 <div id="app">
 
-  <video id="video-hidden" autoplay playsinline muted></video>
-
-  <section class="screen active" id="screen-intro" style="justify-content:center; align-items:center; text-align:center;">
+  <section class="screen active" id="screen-intro">
+    <svg class="dome-mark" viewBox="0 0 100 100" fill="none">
+      <circle cx="50" cy="50" r="46" stroke="#37E6C6" stroke-width="1.5" opacity="0.35"/>
+      <ellipse cx="50" cy="50" rx="46" ry="16" stroke="#37E6C6" stroke-width="1.5" opacity="0.6"/>
+      <ellipse cx="50" cy="50" rx="16" ry="46" stroke="#FF4B2B" stroke-width="1.5" opacity="0.6"/>
+      <circle cx="50" cy="50" r="5" fill="#FF4B2B"/>
+    </svg>
     <div class="eyebrow">Dome Spherical</div>
     <h1>360° HDRI Capture</h1>
-    <p class="sub">Capture bracketed exposure photo spheres projected in 3D space, perfect for Blender World lighting maps.</p>
-    <div class="card" style="width:100%; max-width:360px; text-align:left;">
-      <div class="row"><span class="label">Camera & Sensors</span><span class="hint" id="permStatus">Not requested</span></div>
+    <p class="sub">Capture bracketed photo spheres projected in 3D space, guided by your motion sensors, then stitch an equirectangular map directly for Blender World lighting.</p>
+    <div class="card">
+      <div class="row"><span class="label">Camera</span><span class="hint" id="permCamStatus">not requested</span></div>
+      <div class="row"><span class="label">Motion &amp; orientation</span><span class="hint" id="permMotionStatus">not requested</span></div>
     </div>
-    <button class="btn-primary" id="btnEnable" style="max-width:360px;">Enable Sensors & Camera</button>
-    <p id="permError" style="color:var(--accent); font-size:12px; margin-top:10px;"></p>
+    <button class="btn-primary" id="btnEnable">Enable camera &amp; motion</button>
+    <p class="hint" id="permError" style="margin-top:12px; color:var(--warn);"></p>
   </section>
 
   <section class="screen" id="screen-setup">
-    <div class="eyebrow">Setup</div>
-    <h1>Panorama Density</h1>
-    <p class="sub">Hold your phone steady and pivot on the spot to reduce parallax errors.</p>
+    <div class="eyebrow">Step 1 of 3</div>
+    <h1>Plan the shoot</h1>
+    <p class="sub">Hold your phone steady and rotate on the spot rather than walking to avoid parallax error.</p>
 
     <div class="card">
-      <h2>Grid density</h2>
+      <h2>Coverage Density</h2>
+      <p class="hint" style="margin-bottom:10px;">More shots = fewer gaps, slower capture.</p>
       <div class="choice-group" id="densityChoices">
-        <div class="choice" data-val="quick">Quick<span class="sub">~18 shots</span></div>
-        <div class="choice selected" data-val="standard">Standard<span class="sub">~38 shots</span></div>
-        <div class="choice" data-val="full">Full<span class="sub">~60 shots</span></div>
+        <div class="choice" data-val="quick">Quick<span class="sub">~20 shots</span></div>
+        <div class="choice selected" data-val="standard">Standard<span class="sub">~40 shots</span></div>
+        <div class="choice" data-val="full">Full<span class="sub">~62 shots</span></div>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Output Map Resolution</h2>
+      <div class="choice-group" id="resChoices">
+        <div class="choice" data-val="1536">Preview<span class="sub">1536×768</span></div>
+        <div class="choice selected" data-val="2048">Standard<span class="sub">2048×1024</span></div>
+        <div class="choice" data-val="3072">High<span class="sub">3072×1536</span></div>
+      </div>
+      <canvas class="radar-preview" id="planPreview" width="600" height="300" style="margin-top:12px;"></canvas>
     </div>
 
     <div class="card">
       <div class="row">
         <div>
-          <div class="label" style="font-weight:600;">Bracketed HDR</div>
-          <div class="hint" id="hdrHint" style="font-size:11px; color:var(--muted);">Checking hardware...</div>
+          <div class="label">Bracketed exposures (HDR)</div>
+          <div class="hint" id="bracketHint">checking device support…</div>
         </div>
-        <div class="toggle" id="hdrToggle"></div>
+        <div class="toggle" id="bracketToggle"></div>
       </div>
     </div>
 
-    <button class="btn-primary" id="btnStartCapture" style="margin-top:auto;">Start Capture</button>
+    <div class="card">
+      <div class="row"><span class="label">Camera field of view</span><span class="hint" id="fovVal">68°</span></div>
+      <input type="range" id="fovSlider" min="45" max="90" value="68">
+      <div class="hint">Adjust only if you know your camera's exact horizontal FOV.</div>
+    </div>
+
+    <button class="btn-primary" id="btnStartCapture">Start capture</button>
   </section>
 
   <section class="screen" id="screen-capture">
-    <div id="webgl-container"></div>
+    <video id="video" autoplay playsinline muted></video>
+    
+    <div id="webgl-canvas"></div>
 
-    <div class="cap-header">
-      <button class="cap-btn-round" id="btnBack">↺</button>
-      <button class="cap-btn-round" id="btnClose" style="background:#E53935; border:none;">✕</button>
+    <div class="cap-top">
+      <div class="readout" id="readoutText">yaw <b>0°</b> · pitch <b>0°</b></div>
+      <div class="progress-pill" id="progressPill">0 / 0</div>
     </div>
 
-    <div class="instruction-box" id="instructionText">
-      Shoot a bracketed exposure panorama of your location
-    </div>
-
-    <div class="cap-footer">
-      <div class="counter-badge" id="counterBadge">0 of 38</div>
-      <button class="shutter" id="btnShutter"><div class="inner"></div></button>
+    <div class="cap-bottom">
+      <div class="hint-banner" id="guideBanner">Rotate to align with 3D spherical node</div>
+      <div class="radar-wrap"><canvas id="radarLive" width="220" height="112"></canvas></div>
+      <div class="shutter-row">
+        <button class="side-btn" id="btnCancelCapture">✕</button>
+        <button class="shutter" id="btnShutter"><div class="inner"></div></button>
+        <button class="side-btn" id="btnFinish">✓</button>
+      </div>
     </div>
   </section>
 
-  <section class="screen" id="screen-processing" style="justify-content:center; align-items:center; text-align:center;">
-    <h2>Stitching Sphere...</h2>
+  <section class="screen" id="screen-processing">
+    <h2 id="procTitle">Stitching your dome…</h2>
     <p class="sub" id="procSub">Mapping texture fragments into equirectangular space.</p>
-    <div style="width:240px; height:6px; background:var(--panel-2); border-radius:4px; overflow:hidden; margin:16px 0;">
-      <div id="procBar" style="width:0%; height:100%; background:var(--guide); transition:width .1s;"></div>
-    </div>
+    <div class="bar-track"><div class="bar-fill" id="procBar"></div></div>
+    <div class="hint" id="procPct">0%</div>
   </section>
 
   <section class="screen" id="screen-result">
-    <div class="eyebrow">Complete</div>
-    <h1>HDRI Projection Ready</h1>
+    <div class="eyebrow">Done</div>
+    <h1>Your HDRI Projection Ready</h1>
     <div id="resultCanvasWrap"><canvas id="resultCanvas"></canvas></div>
     <div class="stat-grid">
-      <div class="stat"><div class="num" id="statCoverage">0%</div><div class="lbl">coverage</div></div>
-      <div class="stat"><div class="num" id="statShots">0</div><div class="lbl">shots</div></div>
+      <div class="stat"><div class="num" id="statCoverage">–</div><div class="lbl">sphere coverage</div></div>
+      <div class="stat"><div class="num" id="statShots">–</div><div class="lbl">photos used</div></div>
     </div>
-    <button class="btn-primary" id="btnDownloadPng">Download Panorama (.png)</button>
-    <div style="height:8px;"></div>
-    <button class="btn-secondary" id="btnDownloadHdr" style="display:none;">Download Radiance Map (.hdr)</button>
-    <button class="btn-ghost" id="btnRestart" style="margin-top:12px;">Capture New Dome</button>
+    <button class="btn-primary" id="btnDownloadPng">Download panorama (.png)</button>
+    <div style="height:10px;"></div>
+    <button class="btn-secondary" id="btnDownloadHdr">Download radiance map (.hdr)</button>
+    <div class="card" style="margin-top:16px;">
+      <h2>Using this in Blender</h2>
+      <p class="tip">Go to <b>Shading Workspace</b> -> <b>World Shader</b>, add an <b>Environment Texture</b> node, load file &amp; connect to Background Color.</p>
+    </div>
+    <button class="btn-ghost" id="btnRestart">Capture a new dome</button>
   </section>
 
 </div>
@@ -194,372 +261,657 @@
 (function(){
   "use strict";
 
+  /* ---------------- UTILITY MATH & CONVERSIONS ---------------- */
   const D2R = Math.PI/180, R2D = 180/Math.PI;
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp=(a,b,t)=>a+(b-a)*t;
 
+  function forwardFromYawPitch(yawDeg,pitchDeg){
+    const y=yawDeg*D2R, p=pitchDeg*D2R;
+    return { x: Math.cos(p)*Math.sin(y), y: Math.sin(p), z: Math.cos(p)*Math.cos(y) };
+  }
+  function cross(a,b){ return {x:a.y*b.z-a.z*b.y, y:a.z*b.x-a.x*b.z, z:a.x*b.y-a.y*b.x}; }
+  function dot(a,b){ return a.x*b.x+a.y*b.y+a.z*b.z; }
+  function norm(a){ const l=Math.sqrt(dot(a,a))||1e-9; return {x:a.x/l,y:a.y/l,z:a.z/l}; }
+
+  // Device orientation quaternion math (DeviceOrientationControls standard)
+  function qMul(a,b){
+    return {
+      x: a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
+      y: a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+      z: a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+      w: a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z
+    };
+  }
+  function qFromAxisAngle(axis, angle){
+    const s = Math.sin(angle/2);
+    return { x:axis.x*s, y:axis.y*s, z:axis.z*s, w:Math.cos(angle/2) };
+  }
+  function qFromEulerYXZ(x,y,z){
+    const c1=Math.cos(x/2), c2=Math.cos(y/2), c3=Math.cos(z/2);
+    const s1=Math.sin(x/2), s2=Math.sin(y/2), s3=Math.sin(z/2);
+    return {
+      x: s1*c2*c3 + c1*s2*s3,
+      y: c1*s2*c3 - s1*c2*s3,
+      z: c1*c2*s3 - s1*s2*c3,
+      w: c1*c2*c3 + s1*s2*s3
+    };
+  }
+  function qRotateVec(q, v){
+    const qv = {x:q.x,y:q.y,z:q.z};
+    const t = { x: (qv.y*v.z - qv.z*v.y)*2, y: (qv.z*v.x - qv.x*v.z)*2, z: (qv.x*v.y - qv.y*v.x)*2 };
+    return {
+      x: v.x + t.x*q.w + (qv.y*t.z - qv.z*t.y),
+      y: v.y + t.y*q.w + (qv.z*t.x - qv.x*t.z),
+      z: v.z + t.z*q.w + (qv.x*t.y - qv.y*t.x)
+    };
+  }
+  const Q_WORLD_FIX = qFromAxisAngle({x:1,y:0,z:0}, -Math.PI/2);
+
+  function orientationToBasis(alphaDeg, betaDeg, gammaDeg, screenAngleDeg){
+    const q = qFromEulerYXZ(betaDeg*D2R, alphaDeg*D2R, -gammaDeg*D2R);
+    let out = qMul(q, Q_WORLD_FIX);
+    if (screenAngleDeg){
+      out = qMul(out, qFromAxisAngle({x:0,y:0,z:1}, -screenAngleDeg*D2R));
+    }
+    const forward = norm(qRotateVec(out, {x:0,y:0,z:-1}));
+    const up = norm(qRotateVec(out, {x:0,y:1,z:0}));
+    const right = norm(cross(forward, up));
+    const up2 = cross(right, forward);
+    return { forward, right, up: up2, rawQuat: out };
+  }
+
+  // sRGB <-> linear conversion lookup table
+  const S2L = new Float32Array(256);
+  for(let i=0;i<256;i++){
+    const c=i/255;
+    S2L[i] = c<=0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4);
+  }
+  function lin2srgb(c){
+    c = clamp(c,0,1);
+    return c<=0.0031308 ? c*12.92 : 1.055*Math.pow(c,1/2.4)-0.055;
+  }
+
+  /* ---------------- STATE ---------------- */
   const state = {
-    stream: null, track: null,
-    density: 'standard', hdr: false, hdrSupported: false,
-    targets: [], captured: [],
-    orient: { alpha:0, beta:0, gamma:0 },
-    screenAngle: 0,
-    alignedTargetIdx: -1
+    stream:null, track:null,
+    density:'standard', outRes:2048, bracket:false, bracketSupported:false, bracketRange:null,
+    fovDeg:68,
+    targets:[], captured:[],
+    orient:{yaw:0,pitch:0, forward:{x:0,y:0,z:1}, right:{x:1,y:0,z:0}, up:{x:0,y:1,z:0}, quat:null},
+    smooth:{forward:{x:0,y:0,z:1}, up:{x:0,y:1,z:0}, inited:false},
+    nextTargetIdx:-1,
+    resultLinear:null, resultW:0, resultH:0, resultCoverage:0, resultHDR:false
   };
 
-  /* --- Screen Navigation --- */
-  function showScreen(id){
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    document.getElementById(id).classList.add('active');
-  }
+  const DENSITY_PRESETS = {
+    quick:  { rows:[{p:-40,n:6},{p:0,n:8},{p:40,n:6}], poles:false },
+    standard: { rows:[{p:-60,n:6},{p:-30,n:8},{p:0,n:10},{p:30,n:8},{p:60,n:6}], poles:true },
+    full: { rows:[{p:-75,n:6},{p:-50,n:8},{p:-25,n:10},{p:0,n:12},{p:25,n:10},{p:50,n:8},{p:75,n:6}], poles:true }
+  };
 
-  /* --- Sensor & Camera Setup --- */
-  const btnEnable = document.getElementById('btnEnable');
-  btnEnable.addEventListener('click', async () => {
-    try {
-      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-        const res = await DeviceOrientationEvent.requestPermission();
-        if (res !== 'granted') throw new Error('Motion permission was denied.');
-      }
-      
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: false
-      });
-      state.stream = stream;
-      state.track = stream.getVideoTracks()[0];
-      document.getElementById('video-hidden').srcObject = stream;
-
-      try {
-        const caps = state.track.getCapabilities ? state.track.getCapabilities() : {};
-        state.hdrSupported = !!(caps && caps.exposureCompensation);
-      } catch(e) { state.hdrSupported = false; }
-
-      window.addEventListener('deviceorientation', handleOrientation, true);
-      window.addEventListener('orientationchange', () => { state.screenAngle = window.orientation || 0; });
-
-      document.getElementById('hdrHint').textContent = state.hdrSupported ? 'Supported on this camera' : 'Single exposure fallback';
-      showScreen('screen-setup');
-    } catch(err) {
-      document.getElementById('permError').textContent = err.message || 'Could not access sensors.';
-    }
-  });
-
-  function handleOrientation(e){
-    if (e.alpha === null) return;
-    state.orient.alpha = e.alpha;
-    state.orient.beta = e.beta;
-    state.orient.gamma = e.gamma;
-  }
-
-  /* --- Target Generation --- */
-  function generateTargets(densityKey){
-    const targets = [];
-    const config = {
-      quick: [{p:-35,n:6},{p:0,n:8},{p:35,n:6}],
-      standard: [{p:-55,n:6},{p:-25,n:8},{p:0,n:10},{p:25,n:8},{p:55,n:6}],
-      full: [{p:-70,n:6},{p:-45,n:8},{p:-20,n:10},{p:0,n:12},{p:20,n:10},{p:45,n:8},{p:70,n:6}]
-    }[densityKey];
-
-    config.forEach(row => {
-      for(let i=0; i<row.n; i++){
+  function buildTargets(presetKey){
+    const preset = DENSITY_PRESETS[presetKey];
+    const targets=[];
+    preset.rows.forEach(row=>{
+      for(let i=0;i<row.n;i++){
         const yaw = (360/row.n)*i;
-        targets.push({ yaw, pitch: row.p, captured: false });
+        targets.push({yaw, pitch:row.p, captured:false});
       }
     });
-    targets.push({ yaw:0, pitch:88, captured:false }); // top pole
-    targets.push({ yaw:0, pitch:-88, captured:false }); // bottom pole
+    if (preset.poles){
+      targets.push({yaw:0, pitch:89, captured:false});
+      targets.push({yaw:0, pitch:-89, captured:false});
+    }
+    targets.forEach(t=> t.fwd = forwardFromYawPitch(t.yaw,t.pitch));
     return targets;
   }
 
-  document.getElementById('densityChoices').addEventListener('click', (e) => {
+  /* ---------------- SCREEN MANAGEMENT ---------------- */
+  function showScreen(id){
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+  }
+
+  /* ---------------- PERMISSIONS & SENSORS ---------------- */
+  const btnEnable = document.getElementById('btnEnable');
+  btnEnable.addEventListener('click', async ()=>{
+    const errEl = document.getElementById('permError');
+    errEl.textContent='';
+    btnEnable.disabled = true; btnEnable.textContent='Requesting…';
+    try{
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+        const res = await DeviceOrientationEvent.requestPermission();
+        document.getElementById('permMotionStatus').textContent = res === 'granted' ? 'granted' : 'denied';
+        if (res !== 'granted') throw new Error('Motion permission was denied.');
+      } else {
+        document.getElementById('permMotionStatus').textContent='granted';
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal:'environment' }, width:{ideal:1920}, height:{ideal:1080} },
+        audio:false
+      });
+      state.stream = stream;
+      state.track = stream.getVideoTracks()[0];
+      document.getElementById('permCamStatus').textContent='granted';
+
+      try{
+        const caps = state.track.getCapabilities ? state.track.getCapabilities() : {};
+        state.bracketSupported = !!(caps && caps.exposureCompensation);
+        state.bracketRange = caps.exposureCompensation || null;
+      }catch(e){ state.bracketSupported=false; }
+
+      startOrientation();
+      setupSetupScreen();
+      showScreen('screen-setup');
+    }catch(err){
+      errEl.textContent = err.message || 'Permission request failed.';
+      btnEnable.disabled=false; btnEnable.textContent='Enable camera & motion';
+    }
+  });
+
+  function getScreenAngle(){
+    if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+    if (typeof window.orientation === 'number') return window.orientation;
+    return 0;
+  }
+
+  function startOrientation(){
+    window.addEventListener('deviceorientation', (e)=>{
+      if (e.alpha==null || e.beta==null || e.gamma==null) return;
+      const basis = orientationToBasis(e.alpha, e.beta, e.gamma, getScreenAngle());
+
+      const s = state.smooth;
+      const a = s.inited ? 0.35 : 1.0;
+      if (!s.inited){
+        s.forward = basis.forward; s.up = basis.up;
+      } else {
+        s.forward = norm({x: s.forward.x*(1-a) + basis.forward.x*a, y: s.forward.y*(1-a) + basis.forward.y*a, z: s.forward.z*(1-a) + basis.forward.z*a});
+        s.up = norm({x: s.up.x*(1-a) + basis.up.x*a, y: s.up.y*(1-a) + basis.up.a, z: s.up.z*(1-a) + basis.up.z*a});
+      }
+      s.inited = true;
+
+      const right = norm(cross(s.forward, s.up));
+      const up = cross(right, s.forward);
+
+      state.orient.forward = s.forward;
+      state.orient.right = right;
+      state.orient.up = up;
+      state.orient.quat = basis.rawQuat;
+      state.orient.yaw = ((Math.atan2(s.forward.x, s.forward.z)*R2D)+360)%360;
+      state.orient.pitch = Math.asin(clamp(s.forward.y,-1,1))*R2D;
+    }, true);
+  }
+
+  /* ---------------- SETUP SCREEN ---------------- */
+  function setupSetupScreen(){
+    document.getElementById('bracketHint').textContent = state.bracketSupported
+      ? 'Supported on this device — 3 bracketed exposures merged into HDR.'
+      : 'Single exposure mode on this browser/device.';
+    document.getElementById('bracketToggle').classList.toggle('disabled', !state.bracketSupported);
+    drawPlanPreview();
+  }
+
+  document.getElementById('densityChoices').addEventListener('click', (e)=>{
     const el = e.target.closest('.choice'); if(!el) return;
-    [...document.getElementById('densityChoices').children].forEach(c => c.classList.remove('selected'));
+    [...document.getElementById('densityChoices').children].forEach(c=>c.classList.remove('selected'));
     el.classList.add('selected');
     state.density = el.dataset.val;
+    drawPlanPreview();
+  });
+  document.getElementById('resChoices').addEventListener('click', (e)=>{
+    const el = e.target.closest('.choice'); if(!el) return;
+    [...document.getElementById('resChoices').children].forEach(c=>c.classList.remove('selected'));
+    el.classList.add('selected');
+    state.outRes = parseInt(el.dataset.val,10);
+  });
+  document.getElementById('bracketToggle').addEventListener('click', ()=>{
+    if(!state.bracketSupported) return;
+    state.bracket = !state.bracket;
+    document.getElementById('bracketToggle').classList.toggle('on', state.bracket);
+  });
+  const fovSlider = document.getElementById('fovSlider');
+  fovSlider.addEventListener('input', ()=>{
+    state.fovDeg = parseInt(fovSlider.value,10);
+    document.getElementById('fovVal').textContent = state.fovDeg+'°';
+    drawPlanPreview();
   });
 
-  document.getElementById('hdrToggle').addEventListener('click', () => {
-    if(!state.hdrSupported) return;
-    state.hdr = !state.hdr;
-    document.getElementById('hdrToggle').classList.toggle('on', state.hdr);
-  });
+  function drawPlanPreview(){
+    const targets = buildTargets(state.density);
+    const cv = document.getElementById('planPreview');
+    const ctx = cv.getContext('2d');
+    const W=cv.width, H=cv.height;
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = '#0E1013'; ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth=1;
+    for(let i=1;i<8;i++){ const x=W/8*i; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+    for(let i=1;i<4;i++){ const y=H/4*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+    targets.forEach(t=>{
+      const x = ((t.yaw+180)%360)/360*W;
+      const y = (90-t.pitch)/180*H;
+      ctx.beginPath(); ctx.arc(x,y,3,0,Math.PI*2);
+      ctx.fillStyle='#37E6C6'; ctx.globalAlpha=0.75; ctx.fill(); ctx.globalAlpha=1;
+    });
+  }
 
-  /* --- 3D Viewport Setup (Three.js) --- */
-  let scene, camera, renderer, cameraContainer;
-  let targetNodesGroup, capturedPlanesGroup, liveVideoMesh, centerReticle;
+  /* ---------------- THREE.JS 3D SPHERICAL VIEWPORT SETUP ---------------- */
+  let scene, camera, renderer, cameraGroup, targets3DGroup, capturedPlanes3DGroup, centralReticle3D;
 
-  function initThreeJS(){
-    const container = document.getElementById('webgl-container');
+  function initThreeJSViewport(){
+    const container = document.getElementById('webgl-canvas');
     container.innerHTML = '';
 
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera = new THREE.PerspectiveCamera(state.fovDeg, window.innerWidth / window.innerHeight, 0.1, 1000);
     
+    // Transparent WebGL Renderer layered over camera video
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
 
-    cameraContainer = new THREE.Object3D();
-    cameraContainer.add(camera);
-    scene.add(cameraContainer);
+    cameraGroup = new THREE.Group();
+    cameraGroup.add(camera);
+    scene.add(cameraGroup);
 
-    // Live Camera Video Quad in 3D Space (Pinhole Projection Box)
-    const videoTex = new THREE.VideoTexture(document.getElementById('video-hidden'));
-    const videoGeo = new THREE.PlaneGeometry(1.6, 1.2);
-    const videoMat = new THREE.MeshBasicMaterial({ map: videoTex, side: THREE.DoubleSide });
-    liveVideoMesh = new THREE.Mesh(videoGeo, videoMat);
-    liveVideoMesh.position.set(0, 0, -1.2); // position in front of view camera
-    camera.add(liveVideoMesh);
+    // Center crosshair/reticle in camera space
+    const reticleGeo = new THREE.RingGeometry(0.02, 0.028, 32);
+    const reticleMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent:true, opacity:0.8 });
+    centralReticle3D = new THREE.Mesh(reticleGeo, reticleMat);
+    centralReticle3D.position.set(0, 0, -1);
+    camera.add(centralReticle3D);
 
-    // Reticle (Center target ring)
-    const reticleGeo = new THREE.RingGeometry(0.04, 0.048, 32);
-    const reticleMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
-    centerReticle = new THREE.Mesh(reticleGeo, reticleMat);
-    centerReticle.position.set(0, 0, -1.19);
-    camera.add(centerReticle);
-
-    // Groups for 3D sphere nodes & projected image planes
-    targetNodesGroup = new THREE.Group();
-    capturedPlanesGroup = new THREE.Group();
-    scene.add(targetNodesGroup);
-    scene.add(capturedPlanesGroup);
+    targets3DGroup = new THREE.Group();
+    capturedPlanes3DGroup = new THREE.Group();
+    scene.add(targets3DGroup);
+    scene.add(capturedPlanes3DGroup);
 
     rebuild3DTargets();
   }
 
   function rebuild3DTargets(){
-    while(targetNodesGroup.children.length > 0){
-      targetNodesGroup.remove(targetNodesGroup.children[0]);
-    }
+    while(targets3DGroup.children.length > 0) targets3DGroup.remove(targets3DGroup.children[0]);
 
-    const sphereRadius = 10;
+    const radius = 8;
     state.targets.forEach((t, idx) => {
-      const phi = (90 - t.pitch) * D2R;
-      const theta = (t.yaw) * D2R;
+      const fwd = t.fwd;
+      const x = fwd.x * radius;
+      const y = fwd.y * radius;
+      const z = fwd.z * radius;
 
-      const x = sphereRadius * Math.sin(phi) * Math.sin(theta);
-      const y = sphereRadius * Math.cos(phi);
-      const z = sphereRadius * Math.sin(phi) * Math.cos(theta);
-
-      const dotGeo = new THREE.CircleGeometry(0.28, 16);
-      const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
-      const mesh = new THREE.Mesh(dotGeo, dotMat);
-      mesh.position.set(x, y, z);
-      mesh.lookAt(0,0,0);
-      mesh.userData = { idx };
-      targetNodesGroup.add(mesh);
+      // Outer target node ring floating in 3D sphere space
+      const geo = new THREE.RingGeometry(0.18, 0.24, 24);
+      const mat = new THREE.MeshBasicMaterial({ color: 0x37E6C6, side: THREE.DoubleSide, transparent: true, opacity: 0.85 });
+      const ringMesh = new THREE.Mesh(geo, mat);
+      ringMesh.position.set(x, y, z);
+      ringMesh.lookAt(0, 0, 0);
+      ringMesh.userData = { idx };
+      targets3DGroup.add(ringMesh);
     });
   }
 
-  // Convert Device Orientation Angles to Three.js Quaternion (Standard DeviceOrientationControls logic)
-  const zee = new THREE.Vector3(0, 0, 1);
-  const euler = new THREE.Euler();
-  const q0 = new THREE.Quaternion();
-  const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // -90 deg around X
-
-  function updateCameraRotation(){
-    if(!cameraContainer) return;
-
-    const alpha = state.orient.alpha ? state.orient.alpha * D2R : 0;
-    const beta = state.orient.beta ? state.orient.beta * D2R : 0;
-    const gamma = state.orient.gamma ? state.orient.gamma * D2R : 0;
-    const orient = state.screenAngle ? state.screenAngle * D2R : 0;
-
-    euler.set(beta, alpha, -gamma, 'YXZ');
-    cameraContainer.quaternion.setFromEuler(euler);
-    cameraContainer.quaternion.multiply(q1);
-    q0.setFromAxisAngle(zee, -orient);
-    cameraContainer.quaternion.multiply(q0);
+  function updateThreeJSCamera(){
+    if(!cameraGroup || !state.orient.quat) return;
+    const q = state.orient.quat;
+    cameraGroup.quaternion.set(q.x, q.y, q.z, q.w);
   }
 
-  /* --- Main Capture Loop --- */
-  let animId = null;
+  /* ---------------- CAPTURE LOOP ---------------- */
+  const video = document.getElementById('video');
+  const radarLive = document.getElementById('radarLive');
+  let rafId = null;
 
-  document.getElementById('btnStartCapture').addEventListener('click', () => {
-    state.targets = generateTargets(state.density);
+  document.getElementById('btnStartCapture').addEventListener('click', async ()=>{
+    state.targets = buildTargets(state.density);
     state.captured = [];
+    video.srcObject = state.stream;
+    await video.play().catch(()=>{});
+
+    initThreeJSViewport();
     showScreen('screen-capture');
-    initThreeJS();
-    loop();
+    tick();
   });
 
-  function loop(){
-    updateCameraRotation();
+  function nearestUncapturedTarget(){
+    const curFwd = state.orient.forward;
+    let best=-1, bestD=1e9;
+    state.targets.forEach((t,i)=>{
+      if (t.captured) return;
+      const d = Math.acos(clamp(dot(curFwd, t.fwd), -1, 1)) * R2D;
+      if (d<bestD){ bestD=d; best=i; }
+    });
+    return {idx:best, dist:bestD};
+  }
 
-    // Check reticle alignment against 3D nodes
-    let closestIdx = -1;
-    let minDist = 999;
-    const camDir = new THREE.Vector3();
-    camera.getWorldDirection(camDir);
+  function tick(){
+    updateThreeJSCamera();
 
-    targetNodesGroup.children.forEach(node => {
-      const idx = node.userData.idx;
-      if (state.targets[idx].captured) {
-        node.visible = false;
-        return;
-      }
-      node.visible = true;
+    const {idx, dist} = nearestUncapturedTarget();
+    state.nextTargetIdx = idx;
 
-      const nodeDir = node.position.clone().normalize();
-      // camDir points backward in three.js default, invert for forward direction
-      const angle = camDir.clone().negate().angleTo(nodeDir) * R2D;
+    document.getElementById('progressPill').textContent = `${state.captured.length} / ${state.targets.length}`;
+    document.getElementById('readoutText').innerHTML =
+      `yaw <b>${state.orient.yaw.toFixed(0)}°</b> · pitch <b>${state.orient.pitch.toFixed(0)}°</b>`;
 
-      if(angle < minDist){
-        minDist = angle;
-        closestIdx = idx;
+    const aligned = idx>=0 && dist < 12;
+    document.getElementById('btnShutter').classList.toggle('aligned', aligned);
+    document.getElementById('guideBanner').textContent = idx<0
+      ? 'All targets captured — tap ✓ to finish'
+      : (aligned ? 'Aligned with 3D node — tap shutter' : 'Turn towards nearest 3D target ring');
+
+    // Update 3D target visual state
+    targets3DGroup.children.forEach(mesh => {
+      const targetIdx = mesh.userData.idx;
+      if (state.targets[targetIdx].captured) {
+        mesh.visible = false;
+      } else {
+        mesh.visible = true;
+        if (targetIdx === idx) {
+          mesh.material.color.setHex(aligned ? 0x37E6C6 : 0xFF4B2B);
+          mesh.scale.set(1.3, 1.3, 1.3);
+        } else {
+          mesh.material.color.setHex(0x37E6C6);
+          mesh.scale.set(1.0, 1.0, 1.0);
+        }
       }
     });
 
-    const shutterBtn = document.getElementById('btnShutter');
-    if (minDist < 10 && closestIdx !== -1) {
-      state.alignedTargetIdx = closestIdx;
-      shutterBtn.classList.add('aligned');
-    } else {
-      state.alignedTargetIdx = -1;
-      shutterBtn.classList.remove('aligned');
+    if (centralReticle3D) {
+      centralReticle3D.material.color.setHex(aligned ? 0x37E6C6 : 0xffffff);
     }
-
-    document.getElementById('counterBadge').textContent = `${state.captured.length} of ${state.targets.length}`;
 
     renderer.render(scene, camera);
-    animId = requestAnimationFrame(loop);
+    drawRadar(radarLive, state.orient, state.targets, state.nextTargetIdx);
+    rafId = requestAnimationFrame(tick);
   }
 
-  /* --- Capturing & Projecting Photo into 3D Space --- */
-  document.getElementById('btnShutter').addEventListener('click', async () => {
-    const videoEl = document.getElementById('video-hidden');
-    const canvas = document.createElement('canvas');
-    canvas.width = 1024;
-    canvas.height = Math.round(1024 * (videoEl.videoHeight / videoEl.videoWidth));
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-
-    // Create 3D projected plane placed in world space matching camera's orientation
-    const texture = new THREE.CanvasTexture(canvas);
-    const planeGeo = new THREE.PlaneGeometry(3.2, 2.4);
-    const planeMat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
-    const planeMesh = new THREE.Mesh(planeGeo, planeMat);
-
-    // Set position & rotation matching current camera location on the sphere shell
-    const worldQuat = new THREE.Quaternion();
-    camera.getWorldQuaternion(worldQuat);
-    planeMesh.quaternion.copy(worldQuat);
-
-    const forward = new THREE.Vector3(0, 0, -9.8).applyQuaternion(worldQuat);
-    planeMesh.position.copy(forward);
-
-    capturedPlanesGroup.add(planeMesh);
-
-    // Save capture data
-    state.captured.push({
-      canvas,
-      quaternion: worldQuat.clone(),
-      imgData: ctx.getImageData(0,0,canvas.width,canvas.height)
+  function drawRadar(cv, orient, targets, nextIdx){
+    const ctx = cv.getContext('2d');
+    const W=cv.width, H=cv.height;
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='rgba(255,255,255,0.03)'; ctx.fillRect(0,0,W,H);
+    targets.forEach((t,i)=>{
+      const x = ((t.yaw+180)%360)/360*W;
+      const y = (90-t.pitch)/180*H;
+      ctx.beginPath(); ctx.arc(x,y, i===nextIdx?4:2.4, 0, Math.PI*2);
+      if (t.captured){ ctx.fillStyle='#37E6C6'; ctx.fill(); }
+      else if (i===nextIdx){ ctx.strokeStyle='#fff'; ctx.lineWidth=1.2; ctx.stroke(); }
+      else { ctx.fillStyle='rgba(255,255,255,0.25)'; ctx.fill(); }
     });
+    const cx = ((orient.yaw+180)%360)/360*W, cy=(90-clamp(orient.pitch,-90,90))/180*H;
+    ctx.fillStyle='#FF4B2B';
+    ctx.beginPath(); ctx.arc(cx,cy,4,0,Math.PI*2); ctx.fill();
+  }
 
-    if(state.alignedTargetIdx !== -1){
-      state.targets[state.alignedTargetIdx].captured = true;
+  /* ---------------- CAPTURING & ADDING 3D PROJECTION PLANES ---------------- */
+  const WORK_W = 900;
+
+  function grabCanvas(){
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const w = WORK_W, h = Math.round(WORK_W * vh/vw);
+    const c = document.createElement('canvas'); c.width=w; c.height=h;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(video, 0,0, w,h);
+    return {canvas:c, ctx, w, h};
+  }
+
+  async function setExposure(ev){
+    if (!state.bracketSupported) return;
+    try{ await state.track.applyConstraints({advanced:[{exposureCompensation: ev}]}); }catch(e){}
+  }
+  function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+  async function doCapture(){
+    const {idx} = {idx: state.nextTargetIdx};
+    const yaw=state.orient.yaw, pitch=state.orient.pitch;
+    const basisSnap = { forward: {...state.orient.forward}, right: {...state.orient.right}, up: {...state.orient.up} };
+
+    let capturedCanvas;
+
+    if (state.bracket && state.bracketSupported){
+      const range = state.bracketRange || {min:-2,max:2};
+      const evs = [range.min, 0, range.max];
+      const shots = [];
+      for(const ev of evs){
+        await setExposure(ev);
+        await sleep(180);
+        const g = grabCanvas();
+        shots.push({ev, data: g.ctx.getImageData(0,0,g.w,g.h).data, w:g.w, h:g.h, canvas:g.canvas});
+      }
+      await setExposure(0);
+      const {w,h} = shots[0];
+      capturedCanvas = shots[1].canvas;
+      const linear = new Float32Array(w*h*3);
+      for(let p=0;p<w*h;p++){
+        let sumW=0, r=0,g2=0,b=0;
+        for(const s of shots){
+          const o = p*4;
+          const lr=S2L[s.data[o]], lg=S2L[s.data[o+1]], lb=S2L[s.data[o+2]];
+          const lum = (lr+lg+lb)/3;
+          const wgt = Math.max(0.02, 1 - Math.abs(lum*2-1));
+          const scale = Math.pow(2, s.ev);
+          r += wgt*(lr/scale); g2 += wgt*(lg/scale); b += wgt*(lb/scale);
+          sumW += wgt;
+        }
+        const o3=p*3;
+        linear[o3]=r/sumW; linear[o3+1]=g2/sumW; linear[o3+2]=b/sumW;
+      }
+      state.captured.push({yaw,pitch, basis:basisSnap, w,h, isHDR:true, linear});
+    } else {
+      const g = grabCanvas();
+      capturedCanvas = g.canvas;
+      const pixels = g.ctx.getImageData(0,0,g.w,g.h).data;
+      state.captured.push({yaw,pitch, basis:basisSnap, w:g.w, h:g.h, isHDR:false, pixels});
     }
+
+    // Add projected keyframe thumbnail into 3D world space
+    if(capturedCanvas){
+      const tex = new THREE.CanvasTexture(capturedCanvas);
+      const planeGeo = new THREE.PlaneGeometry(3.2, 2.2);
+      const planeMat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, transparent:true, opacity:0.75 });
+      const planeMesh = new THREE.Mesh(planeGeo, planeMat);
+
+      if(cameraGroup){
+        planeMesh.quaternion.copy(cameraGroup.quaternion);
+        const fwdVec = new THREE.Vector3(0,0,-7.5).applyQuaternion(cameraGroup.quaternion);
+        planeMesh.position.copy(fwdVec);
+        capturedPlanes3DGroup.add(planeMesh);
+      }
+    }
+
+    if (state.nextTargetIdx>=0) state.targets[state.nextTargetIdx].captured = true;
+    else {
+      const curFwd = state.orient.forward;
+      let best=-1,bd=1e9;
+      state.targets.forEach((t,i)=>{
+        const d = Math.acos(clamp(dot(curFwd,t.fwd),-1,1))*R2D;
+        if(d<bd){bd=d;best=i;}
+      });
+      if (best>=0 && bd<10) state.targets[best].captured = true;
+    }
+  }
+
+  const btnShutter = document.getElementById('btnShutter');
+  let capturing=false;
+  btnShutter.addEventListener('click', async ()=>{
+    if (capturing) return;
+    capturing = true;
+    btnShutter.style.opacity=0.5;
+    await doCapture();
+    btnShutter.style.opacity=1;
+    capturing=false;
   });
 
-  document.getElementById('btnClose').addEventListener('click', () => {
-    cancelAnimationFrame(animId);
-    if(state.captured.length < 3){
-      showScreen('screen-setup');
-      return;
-    }
-    stitchPanorama();
-  });
-
-  document.getElementById('btnBack').addEventListener('click', () => {
-    cancelAnimationFrame(animId);
+  document.getElementById('btnCancelCapture').addEventListener('click', ()=>{
+    cancelAnimationFrame(rafId);
     showScreen('screen-setup');
   });
+  document.getElementById('btnFinish').addEventListener('click', ()=>{
+    if (state.captured.length < 3){ alert('Capture at least 3 photos first.'); return; }
+    cancelAnimationFrame(rafId);
+    runStitch();
+  });
 
-  /* --- Stitching Equirectangular Output --- */
-  function stitchPanorama(){
+  /* ---------------- STITCHING PROCESS ---------------- */
+  function bilinearLDR(pixels,w,h,u,v){
+    const x0=clamp(Math.floor(u),0,w-1), y0=clamp(Math.floor(v),0,h-1);
+    const x1=Math.min(x0+1,w-1), y1=Math.min(y0+1,h-1);
+    const fx=u-x0, fy=v-y0;
+    function ch(x,y,c){ return S2L[pixels[(y*w+x)*4+c]]; }
+    const r = lerp(lerp(ch(x0,y0,0),ch(x1,y0,0),fx), lerp(ch(x0,y1,0),ch(x1,y1,0),fx), fy);
+    const g = lerp(lerp(ch(x0,y0,1),ch(x1,y0,1),fx), lerp(ch(x0,y1,1),ch(x1,y1,1),fx), fy);
+    const b = lerp(lerp(ch(x0,y0,2),ch(x1,y0,2),fx), lerp(ch(x0,y1,2),ch(x1,y1,2),fx), fy);
+    return [r,g,b];
+  }
+  function bilinearHDR(buf,w,h,u,v){
+    const x0=clamp(Math.floor(u),0,w-1), y0=clamp(Math.floor(v),0,h-1);
+    const x1=Math.min(x0+1,w-1), y1=Math.min(y0+1,h-1);
+    const fx=u-x0, fy=v-y0;
+    function ch(x,y,c){ return buf[(y*w+x)*3+c]; }
+    const r = lerp(lerp(ch(x0,y0,0),ch(x1,y0,0),fx), lerp(ch(x0,y1,0),ch(x1,y1,0),fx), fy);
+    const g = lerp(lerp(ch(x0,y0,1),ch(x1,y0,1),fx), lerp(ch(x0,y1,1),ch(x1,y1,1),fx), fy);
+    const b = lerp(lerp(ch(x0,y0,2),ch(x1,y0,2),fx), lerp(ch(x0,y1,2),ch(x1,y1,2),fx), fy);
+    return [r,g,b];
+  }
+
+  async function runStitch(){
     showScreen('screen-processing');
+    document.getElementById('procTitle').textContent = 'Stitching your dome…';
+    await sleep(30);
 
-    const outW = 2048, outH = 1024;
-    const resCanvas = document.getElementById('resultCanvas');
-    resCanvas.width = outW;
-    resCanvas.height = outH;
-    const ctx = resCanvas.getContext('2d');
-    const outImg = ctx.createImageData(outW, outH);
+    const W = state.outRes, H = Math.round(W/2);
+    const hasHDR = state.captured.some(c=>c.isHDR);
 
-    let coveredCount = 0;
-    const totalPixels = outW * outH;
+    const caps = state.captured.map(c=>{
+      const basis = c.basis;
+      const f = (c.w/2) / Math.tan(state.fovDeg*D2R/2);
+      const halfDiag = Math.atan( Math.sqrt((c.w/2)**2+(c.h/2)**2) / f );
+      return { ...c, basis, f, cosThresh: Math.cos(halfDiag*1.08) };
+    });
 
-    // Projection math into equirectangular map
-    setTimeout(() => {
-      for(let y=0; y<outH; y++){
-        const phi = (90 - (y / outH) * 180) * D2R;
-        const sinPhi = Math.sin(phi), cosPhi = Math.cos(phi);
+    const result = new Float32Array(W*H*3);
+    const covered = new Uint8Array(W*H);
+    const rowsPerChunk = W>=3000 ? 2 : (W>=2000 ? 4 : 8);
 
-        for(let x=0; x<outW; x++){
-          const theta = ((x / outW) * 360 - 180) * D2R;
-          
-          const worldDir = new THREE.Vector3(
-            cosPhi * Math.sin(theta),
-            sinPhi,
-            cosPhi * Math.cos(theta)
-          );
+    let y=0;
+    function processChunk(){
+      const yEnd = Math.min(H, y+rowsPerChunk);
+      for(; y<yEnd; y++){
+        const phi = (90 - (y/H)*180) * D2R;
+        const cphi = Math.cos(phi), sphi = Math.sin(phi);
+        for(let x=0;x<W;x++){
+          const theta = ((x/W)*360 - 180) * D2R;
+          const dir = { x: cphi*Math.sin(theta), y: sphi, z: cphi*Math.cos(theta) };
 
-          // Find photo hitting this ray
-          let found = false;
-          for(let i = state.captured.length - 1; i >= 0; i--){
-            const cap = state.captured[i];
-            const localDir = worldDir.clone().applyQuaternion(cap.quaternion.clone().invert());
-
-            if(localDir.z < -0.2){
-              const f = 1.2;
-              const u = 0.5 + (localDir.x / -localDir.z) * f;
-              const v = 0.5 - (localDir.y / -localDir.z) * f;
-
-              if(u >= 0 && u <= 1 && v >= 0 && v <= 1){
-                const px = Math.floor(u * cap.canvas.width);
-                const py = Math.floor(v * cap.canvas.height);
-                const srcIdx = (py * cap.canvas.width + px) * 4;
-
-                const dstIdx = (y * outW + x) * 4;
-                outImg.data[dstIdx] = cap.imgData.data[srcIdx];
-                outImg.data[dstIdx+1] = cap.imgData.data[srcIdx+1];
-                outImg.data[dstIdx+2] = cap.imgData.data[srcIdx+2];
-                outImg.data[dstIdx+3] = 255;
-
-                coveredCount++;
-                found = true;
-                break;
-              }
-            }
+          let accR=0,accG=0,accB=0,accW=0;
+          for(let ci=0; ci<caps.length; ci++){
+            const c = caps[ci];
+            const dp = dir.x*c.basis.forward.x + dir.y*c.basis.forward.y + dir.z*c.basis.forward.z;
+            if (dp < c.cosThresh) continue;
+            const camX = dir.x*c.basis.right.x + dir.y*c.basis.right.y + dir.z*c.basis.right.z;
+            const camY = dir.x*c.basis.up.x + dir.y*c.basis.up.y + dir.z*c.basis.up.z;
+            const camZ = dp;
+            if (camZ <= 0.02) continue;
+            const ximg = c.f*camX/camZ, yimg = c.f*camY/camZ;
+            const u = c.w/2 + ximg, v = c.h/2 - yimg;
+            if (u<0||u>=c.w-1||v<0||v>=c.h-1) continue;
+            const nx = ximg/(c.w/2), ny = yimg/(c.h/2);
+            const r2 = nx*nx+ny*ny;
+            const weight = Math.max(0.05, 1-r2/1.25);
+            const sample = c.isHDR ? bilinearHDR(c.linear,c.w,c.h,u,v) : bilinearLDR(c.pixels,c.w,c.h,u,v);
+            accR += sample[0]*weight; accG += sample[1]*weight; accB += sample[2]*weight; accW += weight;
           }
-
-          if(!found){
-            const dstIdx = (y * outW + x) * 4;
-            outImg.data[dstIdx] = 15;
-            outImg.data[dstIdx+1] = 17;
-            outImg.data[dstIdx+2] = 20;
-            outImg.data[dstIdx+3] = 255;
+          const o = (y*W+x)*3;
+          if (accW > 1e-5){
+            result[o]=accR/accW; result[o+1]=accG/accW; result[o+2]=accB/accW;
+            covered[y*W+x]=1;
           }
         }
       }
-
-      ctx.putImageData(outImg, 0, 0);
-      document.getElementById('statCoverage').textContent = `${Math.round((coveredCount / totalPixels)*100)}%`;
-      document.getElementById('statShots').textContent = state.captured.length;
-      showScreen('screen-result');
-    }, 100);
+      const pct = Math.round((y/H)*100);
+      document.getElementById('procBar').style.width = pct+'%';
+      document.getElementById('procPct').textContent = pct+'%';
+      if (y<H){ setTimeout(processChunk, 0); }
+      else finalizeStitch(result, covered, W, H, hasHDR);
+    }
+    processChunk();
   }
 
-  /* --- Download Handlers --- */
-  document.getElementById('btnDownloadPng').addEventListener('click', () => {
+  function finalizeStitch(result, covered, W, H, hasHDR){
+    let coveredCount=0;
+    for(let i=0;i<covered.length;i++) if(covered[i]) coveredCount++;
+    state.resultLinear = result;
+    state.resultW = W; state.resultH = H;
+    state.resultCoverage = coveredCount/covered.length;
+    state.resultHDR = hasHDR;
+
+    const cv = document.getElementById('resultCanvas');
+    cv.width=W; cv.height=H;
+    const ctx = cv.getContext('2d');
+    const img = ctx.createImageData(W,H);
+    for(let i=0;i<W*H;i++){
+      let r=result[i*3], g=result[i*3+1], b=result[i*3+2];
+      if (hasHDR){
+        r=r/(1+r); g=g/(1+g); b=b/(1+b);
+      }
+      const o=i*4;
+      img.data[o]  = Math.round(lin2srgb(r)*255);
+      img.data[o+1]= Math.round(lin2srgb(g)*255);
+      img.data[o+2]= Math.round(lin2srgb(b)*255);
+      img.data[o+3]= 255;
+    }
+    ctx.putImageData(img,0,0);
+
+    document.getElementById('statCoverage').textContent = Math.round(state.resultCoverage*100)+'%';
+    document.getElementById('statShots').textContent = state.captured.length;
+    document.getElementById('btnDownloadHdr').style.display = hasHDR ? 'block' : 'none';
+    showScreen('screen-result');
+  }
+
+  /* ---------------- EXPORTS ---------------- */
+  document.getElementById('btnDownloadPng').addEventListener('click', ()=>{
+    const cv = document.getElementById('resultCanvas');
+    cv.toBlob(blob=>{
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'dome-panorama.png';
+      a.click();
+    }, 'image/png');
+  });
+
+  document.getElementById('btnDownloadHdr').addEventListener('click', ()=>{
+    const W=state.resultW, H=state.resultH, buf=state.resultLinear;
+    const header = `#?RADIANCE\n# Dome iPhone HDRI Capture\nFORMAT=32-bit_rle_rgbe\n\n-Y ${H} +X ${W}\n`;
+    const headerBytes = new TextEncoder().encode(header);
+    const body = new Uint8Array(W*H*4);
+    for(let i=0;i<W*H;i++){
+      const r=buf[i*3], g=buf[i*3+1], b=buf[i*3+2];
+      const v = Math.max(r,g,b);
+      let ri=0,gi=0,bi=0,ei=0;
+      if (v >= 1e-32){
+        let e = Math.ceil(Math.log2(v));
+        const s = Math.pow(2, e-8);
+        ri = clamp(Math.round(r/s),0,255);
+        gi = clamp(Math.round(g/s),0,255);
+        bi = clamp(Math.round(b/s),0,255);
+        ei = clamp(e+128,0,255);
+      }
+      const o=i*4;
+      body[o]=ri; body[o+1]=gi; body[o+2]=bi; body[o+3]=ei;
+    }
+    const full = new Uint8Array(headerBytes.length + body.length);
+    full.set(headerBytes,0); full.set(body, headerBytes.length);
+    const blob = new Blob([full], {type:'application/octet-stream'});
     const a = document.createElement('a');
-    a.href = document.getElementById('resultCanvas').toDataURL('image/png');
-    a.download = 'spherical-hdri.png';
+    a.href = URL.createObjectURL(blob);
+    a.download = 'dome-radiance.hdr';
     a.click();
   });
 
-  document.getElementById('btnRestart').addEventListener('click', () => {
+  document.getElementById('btnRestart').addEventListener('click', ()=>{
+    state.captured=[]; state.targets=[]; state.resultLinear=null;
     showScreen('screen-setup');
   });
 
