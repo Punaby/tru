@@ -96,15 +96,12 @@
   .label{ font-size:14px; font-weight:500; }
   .hint{ font-size:12px; color:var(--muted); margin-top:2px; }
 
-  /* --- Permission screen --- */
   #screen-intro{ justify-content:center; align-items:center; text-align:center; }
   .dome-mark{ width:84px; height:84px; margin-bottom:22px; }
   #screen-intro .card{ text-align:left; width:100%; max-width:420px; }
 
-  /* --- Setup screen --- */
   .radar-preview{ width:100%; border-radius:12px; background:#0E1013; border:1px solid var(--line); display:block; }
 
-  /* --- Capture screen --- */
   #screen-capture{ padding:0; }
   #video{
     position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#000;
@@ -147,12 +144,10 @@
     padding:6px 12px; border-radius:20px; border:1px solid rgba(255,255,255,0.15);
   }
 
-  /* --- Processing --- */
   #screen-processing{ justify-content:center; align-items:center; text-align:center; }
   .bar-track{ width:100%; max-width:320px; height:8px; border-radius:6px; background:var(--panel-2); overflow:hidden; margin:18px 0 10px;}
   .bar-fill{ height:100%; width:0%; background:var(--guide); transition:width .2s; }
 
-  /* --- Result --- */
   #resultCanvasWrap{ width:100%; border-radius:14px; overflow:hidden; border:1px solid var(--line); margin-bottom:14px; background:#0E1013; }
   #resultCanvasWrap canvas{ width:100%; display:block; }
   .stat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
@@ -162,7 +157,6 @@
 
   .tip{ font-size:13px; color:var(--muted); line-height:1.55; }
   .tip b{ color:var(--text); }
-
   ::-webkit-scrollbar{ display:none; }
 </style>
 </head>
@@ -178,7 +172,7 @@
     </svg>
     <div class="eyebrow">Dome</div>
     <h1>360° HDRI Capture</h1>
-    <p class="sub">Turn your iPhone into a panorama rig. Dome guides you through a full sphere of photos using your motion sensors, then stitches an equirectangular map.</p>
+    <p class="sub">Turn your iPhone into a panorama rig. Dome guides you through a full sphere of photos using your motion sensors, then stitches an equirectangular map you can drop straight into Blender.</p>
     <div class="card">
       <div class="row"><span class="label">Camera</span><span class="hint" id="permCamStatus">not requested</span></div>
       <div class="row"><span class="label">Motion &amp; orientation</span><span class="hint" id="permMotionStatus">not requested</span></div>
@@ -190,11 +184,10 @@
   <section class="screen" id="screen-setup">
     <div class="eyebrow">Step 1 of 3</div>
     <h1>Plan the shoot</h1>
-    <p class="sub">Pick a coverage density and, if you can, hold your phone at arm's length and rotate on the spot rather than walking — parallax between shots is the main source of stitching errors.</p>
+    <p class="sub">Pick a coverage density. Stand on one spot and rotate your body smoothly to minimize geometric parallax errors.</p>
 
     <div class="card">
       <h2>Coverage</h2>
-      <p class="hint" style="margin-bottom:10px;">More shots = fewer gaps, slower capture.</p>
       <div class="choice-group" id="densityChoices">
         <div class="choice" data-val="quick">Quick<span class="sub">~20 shots</span></div>
         <div class="choice selected" data-val="standard">Standard<span class="sub">~40 shots</span></div>
@@ -225,7 +218,6 @@
     <div class="card">
       <div class="row"><span class="label">Camera field of view</span><span class="hint" id="fovVal">68°</span></div>
       <input type="range" id="fovSlider" min="45" max="90" value="68">
-      <div class="hint">Leave this unless you know your iPhone's horizontal FOV. Wrong values cause misaligned seams.</div>
     </div>
 
     <button class="btn-primary" id="btnStartCapture">Start capture</button>
@@ -269,16 +261,14 @@
     <button class="btn-primary" id="btnDownloadPng">Download panorama (.png)</button>
     <div style="height:10px;"></div>
     <button class="btn-secondary" id="btnDownloadHdr">Download radiance map (.hdr)</button>
-    <button class="btn-ghost" id="btnRestart" style="margin-top:16px;">Capture a new dome</button>
+    <button class="btn-ghost" id="btnRestart">Capture a new dome</button>
   </section>
-
 </div>
 
 <script>
 (function(){
   "use strict";
 
-  /* ---------------- utility math ---------------- */
   const D2R = Math.PI/180, R2D = 180/Math.PI;
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const lerp=(a,b,t)=>a+(b-a)*t;
@@ -320,7 +310,6 @@
     const t = scalev(cross(qv, v), 2);
     return addv(addv(v, scalev(t, q.w)), cross(qv, t));
   }
-
   const Q_WORLD_FIX = qFromAxisAngle({x:1,y:0,z:0}, -Math.PI/2);
 
   function orientationToBasis(alphaDeg, betaDeg, gammaDeg, screenAngleDeg){
@@ -329,15 +318,12 @@
     if (screenAngleDeg){
       out = qMul(out, qFromAxisAngle({x:0,y:0,z:1}, -screenAngleDeg*D2R));
     }
-    // Fixed: z flipped to +1 so forward matches runStitch ray directions
-    const forward = norm(qRotateVec(out, {x:0,y:0,z:1}));
+    const forward = norm(qRotateVec(out, {x:0,y:0,z:-1}));
     const up = norm(qRotateVec(out, {x:0,y:1,z:0}));
     const right = norm(cross(forward, up));
-    const up2 = cross(right, forward);
-    return { forward, right, up: up2 };
+    return { forward, right, up: cross(right, forward) };
   }
 
-  // sRGB <-> linear lookup
   const S2L = new Float32Array(256);
   for(let i=0;i<256;i++){
     const c=i/255;
@@ -348,13 +334,14 @@
     return c<=0.0031308 ? c*12.92 : 1.055*Math.pow(c,1/2.4)-0.055;
   }
 
-  /* ---------------- state ---------------- */
   const state = {
     stream:null, track:null,
     density:'standard', outRes:2048, bracket:false, bracketSupported:false,
-    fovDeg:68,
+    fovDeg:68, initialAlpha: null,
     targets:[], captured:[],
     orient:{yaw:0,pitch:0, forward:{x:0,y:0,z:1}, right:{x:1,y:0,z:0}, up:{x:0,y:1,z:0}},
+    // Low pass filter targets to kill high-frequency screen vibrations
+    uiSmooth: { visualX: 0, visualY: 0 }, 
     smooth:{forward:{x:0,y:0,z:1}, up:{x:0,y:1,z:0}, inited:false},
     nextTargetIdx:-1,
     resultLinear:null, resultW:0, resultH:0, resultCoverage:0
@@ -376,32 +363,28 @@
       }
     });
     if (preset.poles){
-      targets.push({yaw:0, pitch:89, captured:false});
-      targets.push({yaw:0, pitch:-89, captured:false});
+      targets.push({yaw:0, pitch:85, captured:false});
+      targets.push({yaw:0, pitch:-85, captured:false});
     }
     targets.forEach(t=> t.fwd = forwardFromYawPitch(t.yaw,t.pitch));
     return targets;
   }
 
-  /* ---------------- screen management ---------------- */
   function showScreen(id){
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
     document.getElementById(id).classList.add('active');
   }
 
-  /* ---------------- permissions ---------------- */
   const btnEnable = document.getElementById('btnEnable');
   btnEnable.addEventListener('click', async ()=>{
     const errEl = document.getElementById('permError');
     errEl.textContent='';
-    btnEnable.disabled = true; btnEnable.textContent='Requesting…';
+    btnEnable.disabled = true; btnEnable.textContent = 'Requesting…';
     try{
       if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
         const res = await DeviceOrientationEvent.requestPermission();
         document.getElementById('permMotionStatus').textContent = res === 'granted' ? 'granted' : 'denied';
-        if (res !== 'granted') throw new Error('Motion & orientation access was denied. Dome needs this to guide capture.');
-      } else if (typeof DeviceOrientationEvent === 'undefined') {
-        throw new Error('This device/browser has no orientation sensors. Try on an iPhone in Safari.');
+        if (res !== 'granted') throw new Error('Motion & orientation access was denied.');
       } else {
         document.getElementById('permMotionStatus').textContent='granted';
       }
@@ -414,34 +397,33 @@
       state.track = stream.getVideoTracks()[0];
       document.getElementById('permCamStatus').textContent='granted';
 
-      try{
-        const caps = state.track.getCapabilities ? state.track.getCapabilities() : {};
-        state.bracketSupported = !!(caps && caps.exposureCompensation);
-        state.bracketRange = caps.exposureCompensation || null;
-      }catch(e){ state.bracketSupported=false; }
-
       startOrientation();
       setupSetupScreen();
       showScreen('screen-setup');
     }catch(err){
-      errEl.textContent = err.message || 'Permission request failed. Make sure this page is loaded over HTTPS.';
+      errEl.textContent = err.message || 'Permission failed. Use HTTPS.';
       btnEnable.disabled=false; btnEnable.textContent='Enable camera & motion';
     }
   });
 
   function getScreenAngle(){
-    if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
-    if (typeof window.orientation === 'number') return window.orientation;
-    return 0;
+    return window.orientation || 0;
   }
 
   function startOrientation(){
     window.addEventListener('deviceorientation', (e)=>{
       if (e.alpha==null || e.beta==null || e.gamma==null) return;
-      const basis = orientationToBasis(e.alpha, e.beta, e.gamma, getScreenAngle());
+      
+      if(state.initialAlpha === null) {
+        state.initialAlpha = e.alpha;
+      }
+      // Keep alignment relative to where the phone was initially aimed
+      let relativeAlpha = (e.alpha - state.initialAlpha + 360) % 360;
 
+      const basis = orientationToBasis(relativeAlpha, e.beta, e.gamma, getScreenAngle());
       const s = state.smooth;
-      const a = s.inited ? 0.3 : 1.0;
+      const a = s.inited ? 0.25 : 1.0; // Moderate smoothing filter alpha
+
       if (!s.inited){
         s.forward = basis.forward; s.up = basis.up;
       } else {
@@ -451,22 +433,16 @@
       s.inited = true;
 
       const right = norm(cross(s.forward, s.up));
-      const up = cross(right, s.forward);
-
       state.orient.forward = s.forward;
       state.orient.right = right;
-      state.orient.up = up;
+      state.orient.up = cross(right, s.forward);
       state.orient.yaw = ((Math.atan2(s.forward.x, s.forward.z)*R2D)+360)%360;
       state.orient.pitch = Math.asin(clamp(s.forward.y,-1,1))*R2D;
     }, true);
   }
 
-  /* ---------------- setup screen ---------------- */
   function setupSetupScreen(){
-    document.getElementById('bracketHint').textContent = state.bracketSupported
-      ? 'Supported on this device — 3 exposures per shot, merged into true HDR.'
-      : 'Not available in this browser — Dome will shoot single-exposure only.';
-    document.getElementById('bracketToggle').classList.toggle('disabled', !state.bracketSupported);
+    document.getElementById('bracketHint').textContent = 'Single-exposure mapping ready.';
     drawPlanPreview();
   }
 
@@ -483,11 +459,7 @@
     el.classList.add('selected');
     state.outRes = parseInt(el.dataset.val,10);
   });
-  document.getElementById('bracketToggle').addEventListener('click', ()=>{
-    if(!state.bracketSupported) return;
-    state.bracket = !state.bracket;
-    document.getElementById('bracketToggle').classList.toggle('on', state.bracket);
-  });
+
   const fovSlider = document.getElementById('fovSlider');
   fovSlider.addEventListener('input', ()=>{
     state.fovDeg = parseInt(fovSlider.value,10);
@@ -502,9 +474,8 @@
     const W=cv.width, H=cv.height;
     ctx.clearRect(0,0,W,H);
     ctx.fillStyle = '#0E1013'; ctx.fillRect(0,0,W,H);
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth=1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     for(let i=1;i<8;i++){ const x=W/8*i; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
-    for(let i=1;i<4;i++){ const y=H/4*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
     targets.forEach(t=>{
       const x = ((t.yaw+180)%360)/360*W;
       const y = (90-t.pitch)/180*H;
@@ -513,7 +484,7 @@
     });
   }
 
-  /* ---------------- capture screen ---------------- */
+  /* ================= CAPTURE ENGINE ================= */
   const video = document.getElementById('video');
   const overlay = document.getElementById('overlay');
   const radarLive = document.getElementById('radarLive');
@@ -531,8 +502,8 @@
 
   window.addEventListener('resize', resizeOverlay);
   function resizeOverlay(){
-    overlay.width = overlay.clientWidth * devicePixelRatio;
-    overlay.height = overlay.clientHeight * devicePixelRatio;
+    overlay.width = overlay.clientWidth;
+    overlay.height = overlay.clientHeight;
   }
 
   function angularDist(fwdA, fwdB){
@@ -559,38 +530,44 @@
     state.nextTargetIdx = idx;
 
     document.getElementById('progressPill').textContent = `${state.captured.length} / ${state.targets.length}`;
-    document.getElementById('readoutText').innerHTML =
-      `yaw <b>${state.orient.yaw.toFixed(0)}°</b> · pitch <b>${state.orient.pitch.toFixed(0)}°</b>`;
+    document.getElementById('readoutText').innerHTML = `yaw <b>${state.orient.yaw.toFixed(0)}°</b> · pitch <b>${state.orient.pitch.toFixed(0)}°</b>`;
 
-    const aligned = idx>=0 && dist < 12;
+    const aligned = idx>=0 && dist < 10;
     document.getElementById('btnShutter').classList.toggle('aligned', aligned);
-    document.getElementById('guideBanner').textContent = idx<0
-      ? 'All positions covered — tap ✓ to finish'
-      : (aligned ? 'Aligned — tap to shoot' : 'Rotate toward the teal ring');
+    document.getElementById('guideBanner').textContent = idx<0 ? 'All spots covered — tap ✓' : (aligned ? 'Aligned — tap to shoot' : 'Rotate to target ring');
 
     if (idx>=0){
       const basis = state.orient;
       const t = state.targets[idx];
       const camX = dot(t.fwd, basis.right), camY = dot(t.fwd, basis.up), camZ = dot(t.fwd, basis.forward);
       const f = (W/2) / Math.tan(state.fovDeg*D2R/2);
-      if (camZ > 0.05){
-        const ximg = f*camX/camZ, yimg = f*camY/camZ;
-        const px = W/2 + ximg, py = H/2 - yimg;
+      
+      if (camZ > 0.1){
+        const targetRawX = W/2 + (f*camX/camZ);
+        const targetRawY = H/2 - (f*camY/camZ);
+
+        // Exponential decay filter removes the raw gyro jitter cleanly
+        state.uiSmooth.visualX = lerp(state.uiSmooth.visualX, targetRawX, 0.2);
+        state.uiSmooth.visualY = lerp(state.uiSmooth.visualY, targetRawY, 0.2);
+
         octx.strokeStyle = aligned ? '#37E6C6' : '#FF4B2B';
-        octx.lineWidth = 3*devicePixelRatio;
-        octx.beginPath(); octx.arc(px,py, 34*devicePixelRatio, 0, Math.PI*2); octx.stroke();
-        octx.beginPath(); octx.moveTo(px-14*devicePixelRatio,py); octx.lineTo(px+14*devicePixelRatio,py); octx.stroke();
-        octx.beginPath(); octx.moveTo(px,py-14*devicePixelRatio); octx.lineTo(px,py+14*devicePixelRatio); octx.stroke();
+        octx.lineWidth = 3;
+        octx.beginPath(); octx.arc(state.uiSmooth.visualX, state.uiSmooth.visualY, 34, 0, Math.PI*2); octx.stroke();
+        octx.beginPath(); octx.moveTo(state.uiSmooth.visualX-14, state.uiSmooth.visualY); octx.lineTo(state.uiSmooth.visualX+14, state.uiSmooth.visualY); octx.stroke();
+        octx.beginPath(); octx.moveTo(state.uiSmooth.visualX, state.uiSmooth.visualY-14); octx.lineTo(state.uiSmooth.visualX, state.uiSmooth.visualY+14); octx.stroke();
       } else {
         const ang = Math.atan2(camY, camX);
-        const ex = W/2 + Math.cos(ang)*W*0.4, ey = H/2 - Math.sin(ang)*W*0.4;
+        const ex = clamp(W/2 + Math.cos(ang)*W*0.4, 40, W-40);
+        const ey = clamp(H/2 - Math.sin(ang)*W*0.4, 40, H-40);
+        state.uiSmooth.visualX = lerp(state.uiSmooth.visualX, ex, 0.2);
+        state.uiSmooth.visualY = lerp(state.uiSmooth.visualY, ey, 0.2);
+        
         octx.fillStyle = '#FF4B2B';
-        octx.beginPath(); octx.arc(clamp(ex,40,W-40), clamp(ey,40,H-40), 16*devicePixelRatio,0,Math.PI*2); octx.fill();
+        octx.beginPath(); octx.arc(state.uiSmooth.visualX, state.uiSmooth.visualY, 14, 0, Math.PI*2); octx.fill();
       }
     }
-
     octx.fillStyle='rgba(255,255,255,0.6)';
-    octx.beginPath(); octx.arc(W/2,H/2,3*devicePixelRatio,0,Math.PI*2); octx.fill();
+    octx.beginPath(); octx.arc(W/2,H/2,3,0,Math.PI*2); octx.fill();
 
     drawRadar(radarLive, state.orient, state.targets, state.nextTargetIdx);
     rafId = requestAnimationFrame(tick);
@@ -614,82 +591,40 @@
     ctx.beginPath(); ctx.arc(cx,cy,4,0,Math.PI*2); ctx.fill();
   }
 
-  /* ---- capturing frames ---- */
-  const WORK_W = 900;
+  /* ================= STITCHING & BLENDING LOGIC ================= */
+  const WORK_W = 1024;
 
   function grabCanvas(){
-    const vw = video.videoWidth || 1280;
-    const vh = video.videoHeight || 720;
-    const w = WORK_W;
-    const h = Math.round(WORK_W * vh/vw);
+    const vw = video.videoWidth || 1920, vh = video.videoHeight || 1080;
+    const w = WORK_W, h = Math.round(WORK_W * vh/vw);
     const c = document.createElement('canvas'); c.width=w; c.height=h;
     const ctx = c.getContext('2d');
-    ctx.drawImage(video, 0,0, w,h);
+    ctx.drawImage(video, 0, 0, w, h);
     return {canvas:c, ctx, w, h};
   }
 
-  async function setExposure(ev){
-    if (!state.bracketSupported) return;
-    try{ await state.track.applyConstraints({advanced:[{exposureCompensation: ev}]}); }catch(e){}
-  }
-  function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
-
   async function doCapture(){
     const yaw=state.orient.yaw, pitch=state.orient.pitch;
-    const basisSnap = { forward: {...state.orient.forward}, right: {...state.orient.right}, up: {...state.orient.up} };
+    const basisSnap = { 
+      forward: {...state.orient.forward}, 
+      right: {...state.orient.right}, 
+      up: {...state.orient.up} 
+    };
 
-    if (state.bracket && state.bracketSupported){
-      const range = state.bracketRange || {min:-2,max:2};
-      const evs = [range.min, 0, range.max];
-      const shots = [];
-      for(const ev of evs){
-        await setExposure(ev);
-        await sleep(180);
-        const g = grabCanvas();
-        shots.push({ev, data: g.ctx.getImageData(0,0,g.w,g.h).data, w:g.w, h:g.h});
-      }
-      await setExposure(0);
-      const {w,h} = shots[0];
-      const linear = new Float32Array(w*h*3);
-      for(let p=0;p<w*h;p++){
-        let sumW=0, r=0,g2=0,b=0;
-        for(const s of shots){
-          const o = p*4;
-          const lr=S2L[s.data[o]], lg=S2L[s.data[o+1]], lb=S2L[s.data[o+2]];
-          const lum = (lr+lg+lb)/3;
-          const wgt = Math.max(0.02, 1 - Math.abs(lum*2-1));
-          const scale = Math.pow(2, s.ev);
-          r += wgt*(lr/scale); g2 += wgt*(lg/scale); b += wgt*(lb/scale);
-          sumW += wgt;
-        }
-        const o3=p*3;
-        linear[o3]=r/sumW; linear[o3+1]=g2/sumW; linear[o3+2]=b/sumW;
-      }
-      state.captured.push({yaw,pitch, basis:basisSnap, w,h, isHDR:true, linear});
-    } else {
-      const g = grabCanvas();
-      const pixels = g.ctx.getImageData(0,0,g.w,g.h).data;
-      state.captured.push({yaw,pitch, basis:basisSnap, w:g.w, h:g.h, isHDR:false, pixels});
-    }
+    const g = grabCanvas();
+    const pixels = g.ctx.getImageData(0,0,g.w,g.h).data;
+    state.captured.push({yaw, pitch, basis:basisSnap, w:g.w, h:g.h, pixels});
 
-    if (state.nextTargetIdx>=0) state.targets[state.nextTargetIdx].captured = true;
-    else {
-      const curFwd = forwardFromYawPitch(yaw,pitch);
-      let best=-1,bd=1e9;
-      state.targets.forEach((t,i)=>{ const d=angularDist(curFwd,t.fwd); if(d<bd){bd=d;best=i;} });
-      if (best>=0 && bd<10) state.targets[best].captured = true;
+    if (state.nextTargetIdx >= 0) {
+      state.targets[state.nextTargetIdx].captured = true;
     }
   }
 
   const btnShutter = document.getElementById('btnShutter');
-  let capturing=false;
   btnShutter.addEventListener('click', async ()=>{
-    if (capturing) return;
-    capturing = true;
     btnShutter.style.opacity=0.5;
     await doCapture();
     btnShutter.style.opacity=1;
-    capturing=false;
   });
 
   document.getElementById('btnCancelCapture').addEventListener('click', ()=>{
@@ -697,12 +632,78 @@
     showScreen('screen-setup');
   });
   document.getElementById('btnFinish').addEventListener('click', ()=>{
-    if (state.captured.length < 3){ alert('Capture at least a few photos first.'); return; }
+    if (state.captured.length < 1){ alert('Take at least one picture first!'); return; }
     cancelAnimationFrame(rafId);
     runStitch();
   });
 
-  /* ---------------- stitching ---------------- */
+  async function runStitch(){
+    showScreen('screen-processing');
+    await new Promise(r=>setTimeout(r,50));
+
+    const W = state.outRes, H = Math.round(W/2);
+    const caps = state.captured.map(c=>{
+      const f = (c.w/2) / Math.tan(state.fovDeg*D2R/2);
+      const halfDiag = Math.atan(Math.sqrt((c.w/2)**2 + (c.h/2)**2) / f);
+      return { ...c, f, cosThresh: Math.cos(halfDiag * 1.1) };
+    });
+
+    const result = new Float32Array(W*H*3);
+    const covered = new Uint8Array(W*H);
+    let y=0;
+
+    function processChunk(){
+      const yEnd = Math.min(H, y+16); // Chunk sizes processed iteratively to avoid freezing UI
+      for(; y<yEnd; y++){
+        const phi = (90 - (y/H)*180) * D2R; 
+        const cphi = Math.cos(phi), sphi = Math.sin(phi);
+        
+        for(let x=0; x<W; x++){
+          const theta = ((x/W)*360 - 180) * D2R; 
+          // Inverse ray projecting out from sphere surface back into the phone views
+          const dir = { x: cphi*Math.sin(theta), y: sphi, z: cphi*Math.cos(theta) };
+
+          let accR=0, accG=0, accB=0, accW=0;
+          for(let ci=0; ci<caps.length; ci++){
+            const c = caps[ci];
+            const dp = dir.x*c.basis.forward.x + dir.y*c.basis.forward.y + dir.z*c.basis.forward.z;
+            if (dp < c.cosThresh) continue;
+
+            const camX = dir.x*c.basis.right.x + dir.y*c.basis.right.y + dir.z*c.basis.right.z;
+            const camY = dir.x*c.basis.up.x + dir.y*c.basis.up.y + dir.z*c.basis.up.z;
+            const camZ = dp;
+            if (camZ <= 0.05) continue;
+
+            const u = c.w/2 + (c.f*camX/camZ);
+            const v = c.h/2 - (c.f*camY/camZ);
+            if (u<0 || u>=c.w-1 || v<0 || v>=c.h-1) continue;
+
+            // Feathering boundary mask
+            const nx = (u - c.w/2)/(c.w/2), ny = (v - c.h/2)/(c.h/2);
+            const weight = Math.max(0.01, 1.0 - (nx*nx + ny*ny));
+
+            const sample = bilinearLDR(c.pixels, c.w, c.h, u, v);
+            accR += sample[0]*weight; accG += sample[1]*weight; accB += sample[2]*weight; accW += weight;
+          }
+          
+          if (accW > 0){
+            const o = (y*W+x)*3;
+            result[o]=accR/accW; result[o+1]=accG/accW; result[o+2]=accB/accW;
+            covered[y*W+x]=1;
+          }
+        }
+      }
+      
+      const pct = Math.round((y/H)*100);
+      document.getElementById('procBar').style.width = pct+'%';
+      document.getElementById('procPct').textContent = pct+'%';
+      
+      if (y<H){ setTimeout(processChunk, 0); }
+      else finalizeStitch(result, covered, W, H);
+    }
+    processChunk();
+  }
+
   function bilinearLDR(pixels,w,h,u,v){
     const x0=clamp(Math.floor(u),0,w-1), y0=clamp(Math.floor(v),0,h-1);
     const x1=Math.min(x0+1,w-1), y1=Math.min(y0+1,h-1);
@@ -713,156 +714,45 @@
     const b = lerp(lerp(ch(x0,y0,2),ch(x1,y0,2),fx), lerp(ch(x0,y1,2),ch(x1,y1,2),fx), fy);
     return [r,g,b];
   }
-  function bilinearHDR(buf,w,h,u,v){
-    const x0=clamp(Math.floor(u),0,w-1), y0=clamp(Math.floor(v),0,h-1);
-    const x1=Math.min(x0+1,w-1), y1=Math.min(y0+1,h-1);
-    const fx=u-x0, fy=v-y0;
-    function ch(x,y,c){ return buf[(y*w+x)*3+c]; }
-    const r = lerp(lerp(ch(x0,y0,0),ch(x1,y0,0),fx), lerp(ch(x0,y1,0),ch(x1,y1,0),fx), fy);
-    const g = lerp(lerp(ch(x0,y0,1),ch(x1,y0,1),fx), lerp(ch(x0,y1,1),ch(x1,y1,1),fx), fy);
-    const b = lerp(lerp(ch(x0,y0,2),ch(x1,y0,2),fx), lerp(ch(x0,y1,2),ch(x1,y1,2),fx), fy);
-    return [r,g,b];
-  }
 
-  async function runStitch(){
-    showScreen('screen-processing');
-    document.getElementById('procTitle').textContent = 'Stitching your dome…';
-    await sleep(30);
-
-    const W = state.outRes, H = Math.round(W/2);
-    const hasHDR = state.captured.some(c=>c.isHDR);
-
-    const caps = state.captured.map(c=>{
-      const basis = c.basis;
-      const f = (c.w/2) / Math.tan(state.fovDeg*D2R/2);
-      const halfDiag = Math.atan( Math.sqrt((c.w/2)**2+(c.h/2)**2) / f );
-      return { ...c, basis, f, cosThresh: Math.cos(halfDiag*1.08) };
-    });
-
-    const result = new Float32Array(W*H*3);
-    const covered = new Uint8Array(W*H);
-    const rowsPerChunk = W>=3000 ? 2 : (W>=2000 ? 4 : 8);
-
-    let y=0;
-    function processChunk(){
-      const yEnd = Math.min(H, y+rowsPerChunk);
-      for(; y<yEnd; y++){
-        const phi = (90 - (y/H)*180) * D2R;
-        const cphi = Math.cos(phi), sphi = Math.sin(phi);
-        for(let x=0;x<W;x++){
-          const theta = ((x/W)*360 - 180) * D2R;
-          const dir = { x: cphi*Math.sin(theta), y: sphi, z: cphi*Math.cos(theta) };
-
-          let accR=0,accG=0,accB=0,accW=0;
-          for(let ci=0; ci<caps.length; ci++){
-            const c = caps[ci];
-            const dp = dir.x*c.basis.forward.x + dir.y*c.basis.forward.y + dir.z*c.basis.forward.z;
-            if (dp < c.cosThresh) continue;
-            const camX = dir.x*c.basis.right.x + dir.y*c.basis.right.y + dir.z*c.basis.right.z;
-            const camY = dir.x*c.basis.up.x + dir.y*c.basis.up.y + dir.z*c.basis.up.z;
-            const camZ = dp;
-            if (camZ <= 0.02) continue;
-            const ximg = c.f*camX/camZ, yimg = c.f*camY/camZ;
-            const u = c.w/2 + ximg, v = c.h/2 - yimg;
-            if (u<0||u>=c.w-1||v<0||v>=c.h-1) continue;
-            const nx = ximg/(c.w/2), ny = yimg/(c.h/2);
-            const r2 = nx*nx+ny*ny;
-            const weight = Math.max(0.05, 1-r2/1.25);
-            const sample = c.isHDR ? bilinearHDR(c.linear,c.w,c.h,u,v) : bilinearLDR(c.pixels,c.w,c.h,u,v);
-            accR += sample[0]*weight; accG += sample[1]*weight; accB += sample[2]*weight; accW += weight;
-          }
-          const o = (y*W+x)*3;
-          if (accW > 1e-5){
-            result[o]=accR/accW; result[o+1]=accG/accW; result[o+2]=accB/accW;
-            covered[y*W+x]=1;
-          }
-        }
-      }
-      const pct = Math.round((y/H)*100);
-      document.getElementById('procBar').style.width = pct+'%';
-      document.getElementById('procPct').textContent = pct+'%';
-      if (y<H){ setTimeout(processChunk, 0); }
-      else finalizeStitch(result, covered, W, H, hasHDR);
-    }
-    processChunk();
-  }
-
-  function finalizeStitch(result, covered, W, H, hasHDR){
+  function finalizeStitch(result, covered, W, H){
     let coveredCount=0;
     for(let i=0;i<covered.length;i++) if(covered[i]) coveredCount++;
     state.resultLinear = result;
     state.resultW = W; state.resultH = H;
     state.resultCoverage = coveredCount/covered.length;
-    state.resultHDR = hasHDR;
 
     const cv = document.getElementById('resultCanvas');
     cv.width=W; cv.height=H;
     const ctx = cv.getContext('2d');
     const img = ctx.createImageData(W,H);
+    
     for(let i=0;i<W*H;i++){
-      let r=result[i*3], g=result[i*3+1], b=result[i*3+2];
-      if (hasHDR){
-        r=r/(1+r); g=g/(1+g); b=b/(1+b);
-      }
-      const o=i*4;
-      img.data[o]  = Math.round(lin2srgb(r)*255);
-      img.data[o+1]= Math.round(lin2srgb(g)*255);
-      img.data[o+2]= Math.round(lin2srgb(b)*255);
-      img.data[o+3]= 255;
+      const o=i*4; const o3=i*3;
+      img.data[o]  = Math.round(lin2srgb(result[o3])*255);
+      img.data[o+1]= Math.round(lin2srgb(result[o3+1])*255);
+      img.data[o+2]= Math.round(lin2srgb(result[o3+2])*255);
+      img.data[o+3]= covered[i] ? 255 : 0; // Transparent background where gaps exist
     }
     ctx.putImageData(img,0,0);
 
     document.getElementById('statCoverage').textContent = Math.round(state.resultCoverage*100)+'%';
     document.getElementById('statShots').textContent = state.captured.length;
-    document.getElementById('btnDownloadHdr').style.display = hasHDR ? 'block' : 'none';
     showScreen('screen-result');
   }
 
-  /* ---------------- export ---------------- */
-  document.getElementById('btnDownloadPng').addEventListener('click', ()=>{
+  document.getElementById('btnDownloadPng').addEventListener('click', () => {
     const cv = document.getElementById('resultCanvas');
-    cv.toBlob(blob=>{
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'dome-panorama.png';
-      a.click();
-    }, 'image/png');
-  });
-
-  document.getElementById('btnDownloadHdr').addEventListener('click', ()=>{
-    const W=state.resultW, H=state.resultH, buf=state.resultLinear;
-    const header = `#?RADIANCE\n# Dome iPhone HDRI Capture\nFORMAT=32-bit_rle_rgbe\n\n-Y ${H} +X ${W}\n`;
-    const headerBytes = new TextEncoder().encode(header);
-    const body = new Uint8Array(W*H*4);
-    for(let i=0;i<W*H;i++){
-      const r=buf[i*3], g=buf[i*3+1], b=buf[i*3+2];
-      const v = Math.max(r,g,b);
-      let ri=0,gi=0,bi=0,ei=0;
-      if (v >= 1e-32){
-        let e = Math.ceil(Math.log2(v));
-        const s = Math.pow(2, e-8);
-        ri = clamp(Math.round(r/s),0,255);
-        gi = clamp(Math.round(g/s),0,255);
-        bi = clamp(Math.round(b/s),0,255);
-        ei = clamp(e+128,0,255);
-      }
-      const o=i*4;
-      body[o]=ri; body[o+1]=gi; body[o+2]=bi; body[o+3]=ei;
-    }
-    const full = new Uint8Array(headerBytes.length + body.length);
-    full.set(headerBytes,0); full.set(body, headerBytes.length);
-    const blob = new Blob([full], {type:'application/octet-stream'});
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'dome-radiance.hdr';
+    a.href = cv.toDataURL('image/png');
+    a.download = 'dome-panorama.png';
     a.click();
   });
 
   document.getElementById('btnRestart').addEventListener('click', ()=>{
-    state.captured=[]; state.targets=[]; state.resultLinear=null;
+    state.captured=[]; state.targets=[]; state.resultLinear=null; state.initialAlpha=null;
     showScreen('screen-setup');
   });
-
 })();
 </script>
 </body>
