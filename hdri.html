@@ -196,6 +196,16 @@
     </div>
 
     <div class="card">
+      <div class="row">
+        <div>
+          <div class="label">Auto-capture on alignment</div>
+          <div class="hint">Automatically fires the shutter when centered</div>
+        </div>
+        <div class="toggle" id="autoCaptureToggle"></div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Output map</h2>
       <div class="choice-group" id="resChoices">
         <div class="choice" data-val="1536">Preview<span class="sub">1536×768</span></div>
@@ -337,10 +347,12 @@
   const state = {
     stream:null, track:null,
     density:'standard', outRes:2048, bracket:false, bracketSupported:false,
+    autoCapture: false, // Auto capture mode state variable
+    alignmentStartTime: null, // Timer stamp tracking duration inside safe alignment window
+    capturing: false,
     fovDeg:68, initialAlpha: null,
     targets:[], captured:[],
     orient:{yaw:0,pitch:0, forward:{x:0,y:0,z:1}, right:{x:1,y:0,z:0}, up:{x:0,y:1,z:0}},
-    // Low pass filter targets to kill high-frequency screen vibrations
     uiSmooth: { visualX: 0, visualY: 0 }, 
     smooth:{forward:{x:0,y:0,z:1}, up:{x:0,y:1,z:0}, inited:false},
     nextTargetIdx:-1,
@@ -417,12 +429,11 @@
       if(state.initialAlpha === null) {
         state.initialAlpha = e.alpha;
       }
-      // Keep alignment relative to where the phone was initially aimed
       let relativeAlpha = (e.alpha - state.initialAlpha + 360) % 360;
 
       const basis = orientationToBasis(relativeAlpha, e.beta, e.gamma, getScreenAngle());
       const s = state.smooth;
-      const a = s.inited ? 0.25 : 1.0; // Moderate smoothing filter alpha
+      const a = s.inited ? 0.25 : 1.0;
 
       if (!s.inited){
         s.forward = basis.forward; s.up = basis.up;
@@ -460,11 +471,23 @@
     state.outRes = parseInt(el.dataset.val,10);
   });
 
+  // Toggle Auto Capture Mode Listeners
+  const autoCaptureToggle = document.getElementById('autoCaptureToggle');
+  autoCaptureToggle.addEventListener('click', () => {
+    state.autoCapture = !state.autoCapture;
+    autoCaptureToggle.classList.toggle('on', state.autoCapture);
+  });
+
   const fovSlider = document.getElementById('fovSlider');
   fovSlider.addEventListener('input', ()=>{
     state.fovDeg = parseInt(fovSlider.value,10);
     document.getElementById('fovVal').textContent = state.fovDeg+'°';
     drawPlanPreview();
+  });
+
+  document.getElementById('bracketToggle').addEventListener('click', ()=>{
+    state.bracket = !state.bracket;
+    document.getElementById('bracketToggle').classList.toggle('on', state.bracket);
   });
 
   function drawPlanPreview(){
@@ -493,6 +516,8 @@
   document.getElementById('btnStartCapture').addEventListener('click', async ()=>{
     state.targets = buildTargets(state.density);
     state.captured = [];
+    state.alignmentStartTime = null;
+    state.capturing = false;
     video.srcObject = state.stream;
     await video.play().catch(()=>{});
     resizeOverlay();
@@ -532,9 +557,22 @@
     document.getElementById('progressPill').textContent = `${state.captured.length} / ${state.targets.length}`;
     document.getElementById('readoutText').innerHTML = `yaw <b>${state.orient.yaw.toFixed(0)}°</b> · pitch <b>${state.orient.pitch.toFixed(0)}°</b>`;
 
-    const aligned = idx>=0 && dist < 10;
+    // Match alignment window rules from uploaded version (~7 degrees)
+    const aligned = idx>=0 && dist < 7;
     document.getElementById('btnShutter').classList.toggle('aligned', aligned);
-    document.getElementById('guideBanner').textContent = idx<0 ? 'All spots covered — tap ✓' : (aligned ? 'Aligned — tap to shoot' : 'Rotate to target ring');
+    document.getElementById('guideBanner').textContent = idx<0 ? 'All spots covered — tap ✓' : (aligned ? (state.autoCapture ? 'Holding position...' : 'Aligned — tap to shoot') : 'Rotate to target ring');
+
+    // FIXED CROSSHAIR UI CONCEPT matching the user uploaded reference image
+    // Center ring stays statically locked to the screen viewport center
+    const centerRingX = W / 2;
+    const centerRingY = H / 2;
+    const ringRadius = 38;
+
+    octx.strokeStyle = aligned ? '#37E6C6' : 'rgba(255, 255, 255, 0.8)';
+    octx.lineWidth = 3;
+    octx.beginPath(); 
+    octx.arc(centerRingX, centerRingY, ringRadius, 0, Math.PI * 2); 
+    octx.stroke();
 
     if (idx>=0){
       const basis = state.orient;
@@ -546,15 +584,15 @@
         const targetRawX = W/2 + (f*camX/camZ);
         const targetRawY = H/2 - (f*camY/camZ);
 
-        // Exponential decay filter removes the raw gyro jitter cleanly
+        // Low-pass interpolation keeps the moving ball perfectly smooth
         state.uiSmooth.visualX = lerp(state.uiSmooth.visualX, targetRawX, 0.2);
         state.uiSmooth.visualY = lerp(state.uiSmooth.visualY, targetRawY, 0.2);
 
-        octx.strokeStyle = aligned ? '#37E6C6' : '#FF4B2B';
-        octx.lineWidth = 3;
-        octx.beginPath(); octx.arc(state.uiSmooth.visualX, state.uiSmooth.visualY, 34, 0, Math.PI*2); octx.stroke();
-        octx.beginPath(); octx.moveTo(state.uiSmooth.visualX-14, state.uiSmooth.visualY); octx.lineTo(state.uiSmooth.visualX+14, state.uiSmooth.visualY); octx.stroke();
-        octx.beginPath(); octx.moveTo(state.uiSmooth.visualX, state.uiSmooth.visualY-14); octx.lineTo(state.uiSmooth.visualX, state.uiSmooth.visualY+14); octx.stroke();
+        // Draw the moving target dot inside our box projection coordinate space
+        octx.fillStyle = aligned ? '#37E6C6' : '#FF4B2B';
+        octx.beginPath();
+        octx.arc(state.uiSmooth.visualX, state.uiSmooth.visualY, 14, 0, Math.PI * 2);
+        octx.fill();
       } else {
         const ang = Math.atan2(camY, camX);
         const ex = clamp(W/2 + Math.cos(ang)*W*0.4, 40, W-40);
@@ -565,9 +603,20 @@
         octx.fillStyle = '#FF4B2B';
         octx.beginPath(); octx.arc(state.uiSmooth.visualX, state.uiSmooth.visualY, 14, 0, Math.PI*2); octx.fill();
       }
+
+      // ================= AUTO-CAPTURE CONTROLLER ENGINE =================
+      if (state.autoCapture && aligned && !state.capturing) {
+        if (state.alignmentStartTime === null) {
+          state.alignmentStartTime = Date.now();
+        } else if (Date.now() - state.alignmentStartTime >= 450) { 
+          // Fire shutter automatically once stabilized for 450 milliseconds
+          state.alignmentStartTime = null; 
+          triggerManualOrAutoCapture();
+        }
+      } else if (!aligned) {
+        state.alignmentStartTime = null; // Break matching filter tracking if alignment drifts out of bounds
+      }
     }
-    octx.fillStyle='rgba(255,255,255,0.6)';
-    octx.beginPath(); octx.arc(W/2,H/2,3,0,Math.PI*2); octx.fill();
 
     drawRadar(radarLive, state.orient, state.targets, state.nextTargetIdx);
     rafId = requestAnimationFrame(tick);
@@ -620,11 +669,18 @@
     }
   }
 
-  const btnShutter = document.getElementById('btnShutter');
-  btnShutter.addEventListener('click', async ()=>{
+  async function triggerManualOrAutoCapture() {
+    state.capturing = true;
     btnShutter.style.opacity=0.5;
     await doCapture();
     btnShutter.style.opacity=1;
+    state.capturing = false;
+  }
+
+  const btnShutter = document.getElementById('btnShutter');
+  btnShutter.addEventListener('click', async ()=>{
+    if(state.capturing) return;
+    await triggerManualOrAutoCapture();
   });
 
   document.getElementById('btnCancelCapture').addEventListener('click', ()=>{
@@ -653,14 +709,13 @@
     let y=0;
 
     function processChunk(){
-      const yEnd = Math.min(H, y+16); // Chunk sizes processed iteratively to avoid freezing UI
+      const yEnd = Math.min(H, y+16);
       for(; y<yEnd; y++){
         const phi = (90 - (y/H)*180) * D2R; 
         const cphi = Math.cos(phi), sphi = Math.sin(phi);
         
         for(let x=0; x<W; x++){
           const theta = ((x/W)*360 - 180) * D2R; 
-          // Inverse ray projecting out from sphere surface back into the phone views
           const dir = { x: cphi*Math.sin(theta), y: sphi, z: cphi*Math.cos(theta) };
 
           let accR=0, accG=0, accB=0, accW=0;
@@ -678,7 +733,6 @@
             const v = c.h/2 - (c.f*camY/camZ);
             if (u<0 || u>=c.w-1 || v<0 || v>=c.h-1) continue;
 
-            // Feathering boundary mask
             const nx = (u - c.w/2)/(c.w/2), ny = (v - c.h/2)/(c.h/2);
             const weight = Math.max(0.01, 1.0 - (nx*nx + ny*ny));
 
@@ -732,7 +786,7 @@
       img.data[o]  = Math.round(lin2srgb(result[o3])*255);
       img.data[o+1]= Math.round(lin2srgb(result[o3+1])*255);
       img.data[o+2]= Math.round(lin2srgb(result[o3+2])*255);
-      img.data[o+3]= covered[i] ? 255 : 0; // Transparent background where gaps exist
+      img.data[o+3]= 255; 
     }
     ctx.putImageData(img,0,0);
 
